@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: tudu-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: tudu_user
+      POSTGRES_PASSWORD: tudu_password
+      POSTGRES_DB: tudu_db
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tudu_user -d tudu_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tudu-api
+    restart: always
+    ports:
+      - '3000:3000'
+    environment:
+      PORT: 3000
+      NODE_ENV: production
+      DATABASE_URL: postgresql://tudu_user:tudu_password@postgres:5432/tudu_db?schema=public
+      JWT_SECRET: ${JWT_SECRET:-tudu_super_secret_jwt_key_2026}
+      REVENUECAT_WEBHOOK_AUTH_TOKEN: ${REVENUECAT_WEBHOOK_AUTH_TOKEN:-revenuecat_secret_token}
+      AI_ROUTING_STRATEGY: ${AI_ROUTING_STRATEGY:-fallback}
+      AI_DEFAULT_PROVIDER: ${AI_DEFAULT_PROVIDER:-deepseek}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      DEEPSEEK_BASE_URL: https://api.deepseek.com/v1
+      DEEPSEEK_MODEL_FAST: deepseek-chat
+      DEEPSEEK_MODEL_REASONING: deepseek-chat
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_MODEL_FAST: gpt-4o-mini
+      OPENAI_MODEL_PARSE: gpt-5.6-luna
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

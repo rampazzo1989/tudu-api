@@ -1,0 +1,146 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum AuthProvider {
+  GOOGLE
+  APPLE
+  DEV_MOCK
+}
+
+enum SubscriptionStatus {
+  INACTIVE
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  EXPIRED
+}
+
+model User {
+  id           String        @id @default(uuid())
+  email        String        @unique
+  name         String?
+  avatarUrl    String?
+  provider     AuthProvider
+  providerId   String        @unique
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  subscription Subscription?
+  lists        List[]
+  tasks        Task[]
+  counters     Counter[]
+  userSettings UserSettings?
+  syncLogs     SyncLog[]
+
+  @@map("users")
+}
+
+model Subscription {
+  id                    String             @id @default(uuid())
+  userId                String             @unique
+  user                  User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status                SubscriptionStatus @default(INACTIVE)
+  planId                String             @default("tudu_pro_monthly")
+  priceCents            Int                @default(490) // R$ 4,90
+  currency              String             @default("BRL")
+  trialStartsAt         DateTime?
+  trialEndsAt           DateTime?
+  currentPeriodStartsAt DateTime?
+  currentPeriodEndsAt   DateTime?
+  originalPurchaseDate  DateTime?
+  revenueCatAppUserId   String?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  @@map("subscriptions")
+}
+
+model List {
+  id         String    @id // Client-generated UUID
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name       String
+  color      String?
+  icon       String?
+  order      Int       @default(0)
+  isArchived Boolean   @default(false)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime? // Soft-delete tombstone for delta sync
+
+  tasks      Task[]
+
+  @@index([userId, updatedAt])
+  @@map("lists")
+}
+
+model Task {
+  id          String    @id // Client-generated UUID
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  listId      String?
+  list        List?     @relation(fields: [listId], references: [id], onDelete: SetNull)
+  title       String
+  description String?
+  done        Boolean   @default(false)
+  starred     Boolean   @default(false)
+  dueDate     DateTime?
+  order       Int       @default(0)
+  isArchived  Boolean   @default(false)
+  isUnlisted  Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  @@index([userId, updatedAt])
+  @@map("tasks")
+}
+
+model Counter {
+  id        String    @id // Client-generated UUID
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  count     Int       @default(0)
+  step      Int       @default(1)
+  color     String?
+  icon      String?
+  order     Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([userId, updatedAt])
+  @@map("counters")
+}
+
+model UserSettings {
+  id                   String   @id @default(uuid())
+  userId               String   @unique
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  notificationSettings Json?
+  backupPreferences    Json?
+  generalSettings      Json?
+  emojiUsage           Json?
+  updatedAt            DateTime @updatedAt
+
+  @@map("user_settings")
+}
+
+model SyncLog {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clientTime  DateTime
+  serverTime  DateTime @default(now())
+  syncedCount Int
+
+  @@map("sync_logs")
+}
