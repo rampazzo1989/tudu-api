@@ -30,9 +30,17 @@ export interface ParseListParams {
   customPrompt?: string;
 }
 
+export interface ReorderListParams {
+  items: string[];
+  currentSections?: string[];
+  customPrompt?: string;
+  listName?: string;
+}
+
 export interface IAiProvider {
   readonly id: AIProviderId;
   suggestEmojis(params: EmojiSuggestionParams, signal?: AbortSignal): Promise<string[]>;
   suggestTasks(params: TaskSuggestionParams, signal?: AbortSignal): Promise<string[]>;
   parseList(params: ParseListParams, signal?: AbortSignal): Promise<ParsedListResult>;
+  reorderList(params: ReorderListParams, signal?: AbortSignal): Promise<ParsedListResult>;
 }

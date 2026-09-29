@@ -13,6 +13,7 @@ import {
   IAiProvider,
   ParsedListResult,
   ParseListParams,
+  ReorderListParams,
   TaskSuggestionParams,
 } from './interfaces/ai-types';
 import { sanitizeInputText } from '../../common/sanitizers/prompt-sanitizer';
@@ -108,6 +109,30 @@ export class AiService {
     return this.executeWithStrategy(
       async (provider, signal) => provider.parseList(sanitizedParams, signal),
       'parseList',
+    ).then(res => ({
+      result: res.data,
+      providerUsed: res.providerUsed,
+    }));
+  }
+
+  async reorderList(userId: string, params: ReorderListParams): Promise<{ result: ParsedListResult; providerUsed: string }> {
+    this.checkAndIncrementQuota(userId, 'parses');
+
+    const cleanCustomPrompt = params.customPrompt ? sanitizeInputText(params.customPrompt, 'customPrompt', 300) : undefined;
+    const cleanListName = params.listName ? sanitizeInputText(params.listName, 'listName', 100) : undefined;
+    const cleanItems = params.items.slice(0, 100).map(it => sanitizeInputText(it, 'item', 150));
+    const cleanSections = params.currentSections?.slice(0, 30).map(sec => sanitizeInputText(sec, 'section', 80));
+
+    const sanitizedParams: ReorderListParams = {
+      items: cleanItems,
+      currentSections: cleanSections,
+      customPrompt: cleanCustomPrompt,
+      listName: cleanListName,
+    };
+
+    return this.executeWithStrategy(
+      async (provider, signal) => provider.reorderList(sanitizedParams, signal),
+      'reorderList',
     ).then(res => ({
       result: res.data,
       providerUsed: res.providerUsed,

@@ -5,6 +5,7 @@ import {
   IAiProvider,
   ParsedListResult,
   ParseListParams,
+  ReorderListParams,
   TaskSuggestionParams,
 } from '../interfaces/ai-types';
 import { extractValidEmojis } from '../../../common/sanitizers/prompt-sanitizer';
@@ -148,6 +149,70 @@ export class OpenAiProvider implements IAiProvider {
     }
   }
 
+  async reorderList(params: ReorderListParams, signal?: AbortSignal): Promise<ParsedListResult> {
+    const itemsText = params.items.map(t => `- ${t}`).join('\n');
+    const listContext = params.listName ? `Título / Tema da Lista: "${params.listName}"\n\n` : '';
+    const sectionsContext = params.currentSections?.length
+      ? `Seções existentes atualmente na lista:\n${params.currentSections.map(s => `- ${s}`).join('\n')}\n\n`
+      : '';
+
+    let rule = '';
+    if (params.customPrompt?.trim()) {
+      rule = `Instruções específicas de ordenação fornecidas pelo usuário:\n"""\n${params.customPrompt.trim()}\n"""\nRegra principal: Agrupe os itens nas seções correspondentes e ordene-os seguindo com rigor as instruções acima.`;
+    } else {
+      rule =
+        `Diretrizes de Agrupamento e Ordenação Inteligente:\n` +
+        `- Contexto Temático: Identifique o domínio da lista e de seus itens.\n` +
+        `- Seções Especializadas: Agrupe OBRIGATORIAMENTE todos os itens em seções temáticas naturais com emoji relevante.\n` +
+        `- Sequência Prática: Ordene as seções e os itens internos na sequência mais lógica.`;
+    }
+
+    const systemPrompt =
+      'You are an intelligent organization assistant in a todo app (Tudú). Your job is to organize, categorize into sections, and reorder todo list items.\n' +
+      'Rules:\n' +
+      '1. ALL original items MUST be preserved and distributed across the created sections. Do NOT omit any item.\n' +
+      '2. Keep emojis and original text of each item.\n' +
+      '3. Return STRICTLY a valid JSON object matching this schema:\n' +
+      '{\n' +
+      '  "title": "String title with emoji",\n' +
+      '  "sections": [\n' +
+      '    {\n' +
+      '      "title": "Emoji + Section Name",\n' +
+      '      "items": ["emoji item 1", "emoji item 2"]\n' +
+      '    }\n' +
+      '  ],\n' +
+      '  "items": ["emoji item 1", "emoji item 2"]\n' +
+      '}\n' +
+      'Do not include markdown codeblocks or text outside JSON.';
+
+    const userPrompt = `${listContext}Itens da lista para reorganizar:\n${itemsText}\n\n${sectionsContext}${rule}`;
+
+    const raw = await this.callChatApi(
+      this.parseModel, // gpt-5.6-luna
+      systemPrompt,
+      userPrompt,
+      1500,
+      0.2,
+      signal,
+    );
+
+    try {
+      const cleaned = raw.replace(/```json/gi, '').replace(/```/g, '').trim();
+      const parsed = JSON.parse(cleaned);
+      return {
+        title: typeof parsed.title === 'string' ? parsed.title : (params.listName || 'Lista Tudú'),
+        items: Array.isArray(parsed.items) ? parsed.items : params.items,
+        sections: Array.isArray(parsed.sections) ? parsed.sections : undefined,
+      };
+    } catch (e) {
+      this.logger.error(`Failed to parse reordered list result: ${e.message}`);
+      return {
+        title: params.listName || 'Lista Tudú',
+        items: params.items,
+      };
+    }
+  }
+
   private async callChatApi(
     model: string,
     systemPrompt: string,
@@ -160,21 +225,28 @@ export class OpenAiProvider implements IAiProvider {
       throw new Error('OpenAI API Key is not configured in Tudú API.');
     }
 
+    const body: Record<string, any> = {
+      model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      max_completion_tokens: maxTokens,
+    };
+
+    // OpenAI models like gpt-5.x, o1, and o3 do not allow custom temperature values
+    const isReasoningOrLuna = model.includes('gpt-5') || model.startsWith('o1') || model.startsWith('o3');
+    if (temperature !== undefined && !isReasoningOrLuna) {
+      body.temperature = temperature;
+    }
+
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${this.apiKey}`,
       },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        temperature,
-        max_tokens: maxTokens,
-      }),
+      body: JSON.stringify(body),
       signal,
     });
 

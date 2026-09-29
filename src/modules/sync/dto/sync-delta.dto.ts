@@ -5,7 +5,12 @@ export class SyncDeltaListDto {
   id: string;
 
   @IsString()
-  name: string;
+  @IsOptional()
+  name?: string;
+
+  @IsString()
+  @IsOptional()
+  label?: string;
 
   @IsString()
   @IsOptional()
@@ -39,7 +44,12 @@ export class SyncDeltaTaskDto {
   listId?: string;
 
   @IsString()
-  title: string;
+  @IsOptional()
+  title?: string;
+
+  @IsString()
+  @IsOptional()
+  label?: string;
 
   @IsString()
   @IsOptional()
@@ -78,14 +88,28 @@ export class SyncDeltaCounterDto {
   id: string;
 
   @IsString()
-  name: string;
+  @IsOptional()
+  name?: string;
+
+  @IsString()
+  @IsOptional()
+  title?: string;
 
   @IsNumber()
-  count: number;
+  @IsOptional()
+  count?: number;
+
+  @IsNumber()
+  @IsOptional()
+  value?: number;
 
   @IsNumber()
   @IsOptional()
   step?: number;
+
+  @IsNumber()
+  @IsOptional()
+  pace?: number;
 
   @IsString()
   @IsOptional()

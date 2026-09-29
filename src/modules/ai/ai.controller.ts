@@ -11,6 +11,7 @@ import { AiService } from './ai.service';
 import { SuggestEmojisDto } from './dto/suggest-emojis.dto';
 import { SuggestTasksDto } from './dto/suggest-tasks.dto';
 import { ParseListDto } from './dto/parse-list.dto';
+import { ReorderListDto } from './dto/reorder-list.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { SubscriptionGuard } from '../../common/guards/subscription.guard';
 import { CurrentUser, CurrentUserData } from '../../common/decorators/current-user.decorator';
@@ -49,6 +50,15 @@ export class AiController {
     @Body() dto: ParseListDto,
   ) {
     return this.aiService.parseList(user.id, dto);
+  }
+
+  @Post('reorder-list')
+  @HttpCode(HttpStatus.OK)
+  async reorderList(
+    @CurrentUser() user: CurrentUserData,
+    @Body() dto: ReorderListDto,
+  ) {
+    return this.aiService.reorderList(user.id, dto);
   }
 
   @Get('quota')

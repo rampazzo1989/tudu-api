@@ -1,6 +1,8 @@
 # Multi-stage build for Tudú API
 FROM node:22-alpine AS builder
 
+RUN apk add --no-cache openssl libc6-compat
+
 WORKDIR /app
 
 # Install build dependencies
@@ -16,16 +18,18 @@ RUN npx prisma generate
 COPY . .
 RUN npm run build
 
-# Production image
+# Runner image
 FROM node:22-alpine AS runner
+
+RUN apk add --no-cache openssl libc6-compat
 
 WORKDIR /app
 
-ENV NODE_ENV=production
+ENV NODE_ENV=development
 
-# Copy built application and production dependencies
+# Copy package and install dependencies (including prisma for db push)
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm ci
 
 COPY prisma ./prisma/
 RUN npx prisma generate
@@ -34,4 +38,5 @@ COPY --from=builder /app/dist ./dist
 
 EXPOSE 3000
 
-CMD ["node", "dist/main"]
+# Automatically push database schema to Postgres before launching API
+CMD ["sh", "-c", "npx prisma db push && node dist/main"]

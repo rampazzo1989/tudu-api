@@ -24,11 +24,13 @@ export class SyncService {
       // 1. Process Lists (myLists and archivedLists)
       const allLists = [...(data.myLists || []), ...(data.archivedLists || [])];
       for (const [id, listObj] of allLists) {
-        if (!id || !listObj?.name) continue;
+        if (!id) continue;
+        const listName = listObj?.name || listObj?.label;
+        if (!listName) continue;
         await tx.list.upsert({
           where: { id },
           update: {
-            name: listObj.name,
+            name: listName,
             color: listObj.color || null,
             icon: listObj.icon || null,
             order: typeof listObj.order === 'number' ? listObj.order : 0,
@@ -38,7 +40,7 @@ export class SyncService {
           create: {
             id,
             userId,
-            name: listObj.name,
+            name: listName,
             color: listObj.color || null,
             icon: listObj.icon || null,
             order: typeof listObj.order === 'number' ? listObj.order : 0,
@@ -54,12 +56,14 @@ export class SyncService {
       for (const [listId, taskPairs] of nestedTaskGroups) {
         if (!Array.isArray(taskPairs)) continue;
         for (const [id, task] of taskPairs) {
-          if (!id || !task?.title) continue;
+          if (!id) continue;
+          const taskTitle = task?.title || task?.label;
+          if (!taskTitle) continue;
           await tx.task.upsert({
             where: { id },
             update: {
               listId: listId || null,
-              title: task.title,
+              title: taskTitle,
               description: task.description || null,
               done: !!task.done,
               starred: !!task.starred,
@@ -73,7 +77,7 @@ export class SyncService {
               id,
               userId,
               listId: listId || null,
-              title: task.title,
+              title: taskTitle,
               description: task.description || null,
               done: !!task.done,
               starred: !!task.starred,
@@ -90,11 +94,13 @@ export class SyncService {
       // Process unlisted tasks
       if (Array.isArray(data.unlistedTudus)) {
         for (const [id, task] of data.unlistedTudus) {
-          if (!id || !task?.title) continue;
+          if (!id) continue;
+          const taskTitle = task?.title || task?.label;
+          if (!taskTitle) continue;
           await tx.task.upsert({
             where: { id },
             update: {
-              title: task.title,
+              title: taskTitle,
               description: task.description || null,
               done: !!task.done,
               starred: !!task.starred,
@@ -106,7 +112,7 @@ export class SyncService {
             create: {
               id,
               userId,
-              title: task.title,
+              title: taskTitle,
               description: task.description || null,
               done: !!task.done,
               starred: !!task.starred,
@@ -122,13 +128,17 @@ export class SyncService {
       // 3. Process Counters
       if (Array.isArray(data.counters)) {
         for (const [id, counter] of data.counters) {
-          if (!id || !counter?.name) continue;
+          if (!id) continue;
+          const counterName = counter?.name || counter?.title;
+          if (!counterName) continue;
+          const count = typeof counter.count === 'number' ? counter.count : (typeof counter.value === 'number' ? counter.value : 0);
+          const step = typeof counter.step === 'number' ? counter.step : (typeof counter.pace === 'number' ? counter.pace : 1);
           await tx.counter.upsert({
             where: { id },
             update: {
-              name: counter.name,
-              count: typeof counter.count === 'number' ? counter.count : 0,
-              step: typeof counter.step === 'number' ? counter.step : 1,
+              name: counterName,
+              count,
+              step,
               color: counter.color || null,
               icon: counter.icon || null,
               order: typeof counter.order === 'number' ? counter.order : 0,
@@ -137,9 +147,9 @@ export class SyncService {
             create: {
               id,
               userId,
-              name: counter.name,
-              count: typeof counter.count === 'number' ? counter.count : 0,
-              step: typeof counter.step === 'number' ? counter.step : 1,
+              name: counterName,
+              count,
+              step,
               color: counter.color || null,
               icon: counter.icon || null,
               order: typeof counter.order === 'number' ? counter.order : 0,
@@ -208,27 +218,28 @@ export class SyncService {
     if (dto.lists && dto.lists.length > 0) {
       for (const item of dto.lists) {
         const deletedAt = item.deletedAt ? new Date(item.deletedAt) : null;
+        const listName = item.name || item.label || 'Lista';
         await this.prisma.list.upsert({
           where: { id: item.id },
           update: {
-            name: item.name,
+            name: listName,
             color: item.color || null,
             icon: item.icon || null,
             order: item.order ?? 0,
             isArchived: !!item.isArchived,
             deletedAt,
-            updatedAt: new Date(item.updatedAt),
+            updatedAt: new Date(item.updatedAt || Date.now()),
           },
           create: {
             id: item.id,
             userId,
-            name: item.name,
+            name: listName,
             color: item.color || null,
             icon: item.icon || null,
             order: item.order ?? 0,
             isArchived: !!item.isArchived,
             deletedAt,
-            updatedAt: new Date(item.updatedAt),
+            updatedAt: new Date(item.updatedAt || Date.now()),
           },
         });
       }
@@ -237,11 +248,12 @@ export class SyncService {
     if (dto.tasks && dto.tasks.length > 0) {
       for (const item of dto.tasks) {
         const deletedAt = item.deletedAt ? new Date(item.deletedAt) : null;
+        const taskTitle = item.title || item.label || 'Tarefa';
         await this.prisma.task.upsert({
           where: { id: item.id },
           update: {
             listId: item.listId || null,
-            title: item.title,
+            title: taskTitle,
             description: item.description || null,
             done: !!item.done,
             starred: !!item.starred,
@@ -250,13 +262,13 @@ export class SyncService {
             isArchived: !!item.isArchived,
             isUnlisted: !!item.isUnlisted,
             deletedAt,
-            updatedAt: new Date(item.updatedAt),
+            updatedAt: new Date(item.updatedAt || Date.now()),
           },
           create: {
             id: item.id,
             userId,
             listId: item.listId || null,
-            title: item.title,
+            title: taskTitle,
             description: item.description || null,
             done: !!item.done,
             starred: !!item.starred,
@@ -265,7 +277,7 @@ export class SyncService {
             isArchived: !!item.isArchived,
             isUnlisted: !!item.isUnlisted,
             deletedAt,
-            updatedAt: new Date(item.updatedAt),
+            updatedAt: new Date(item.updatedAt || Date.now()),
           },
         });
       }
@@ -274,29 +286,32 @@ export class SyncService {
     if (dto.counters && dto.counters.length > 0) {
       for (const item of dto.counters) {
         const deletedAt = item.deletedAt ? new Date(item.deletedAt) : null;
+        const counterName = item.name || item.title || 'Contador';
+        const count = typeof item.count === 'number' ? item.count : (typeof item.value === 'number' ? item.value : 0);
+        const step = typeof item.step === 'number' ? item.step : (typeof item.pace === 'number' ? item.pace : 1);
         await this.prisma.counter.upsert({
           where: { id: item.id },
           update: {
-            name: item.name,
-            count: item.count,
-            step: item.step ?? 1,
+            name: counterName,
+            count,
+            step,
             color: item.color || null,
             icon: item.icon || null,
             order: item.order ?? 0,
             deletedAt,
-            updatedAt: new Date(item.updatedAt),
+            updatedAt: new Date(item.updatedAt || Date.now()),
           },
           create: {
             id: item.id,
             userId,
-            name: item.name,
-            count: item.count,
-            step: item.step ?? 1,
+            name: counterName,
+            count,
+            step,
             color: item.color || null,
             icon: item.icon || null,
             order: item.order ?? 0,
             deletedAt,
-            updatedAt: new Date(item.updatedAt),
+            updatedAt: new Date(item.updatedAt || Date.now()),
           },
         });
       }
@@ -350,17 +365,22 @@ export class SyncService {
       delta: {
         lists: remoteLists.map(l => ({
           ...l,
+          label: l.name,
           updatedAt: l.updatedAt.getTime(),
           deletedAt: l.deletedAt ? l.deletedAt.getTime() : null,
         })),
         tasks: remoteTasks.map(t => ({
           ...t,
+          label: t.title,
           dueDate: t.dueDate ? t.dueDate.toISOString() : null,
           updatedAt: t.updatedAt.getTime(),
           deletedAt: t.deletedAt ? t.deletedAt.getTime() : null,
         })),
         counters: remoteCounters.map(c => ({
           ...c,
+          title: c.name,
+          value: c.count,
+          pace: c.step,
           updatedAt: c.updatedAt.getTime(),
           deletedAt: c.deletedAt ? c.deletedAt.getTime() : null,
         })),
@@ -398,6 +418,7 @@ export class SyncService {
         {
           id: l.id,
           name: l.name,
+          label: l.name,
           color: l.color,
           icon: l.icon,
           order: l.order,
@@ -419,6 +440,7 @@ export class SyncService {
       const taskObj = {
         id: t.id,
         title: t.title,
+        label: t.title,
         description: t.description,
         done: t.done,
         starred: t.starred,
@@ -440,6 +462,22 @@ export class SyncService {
       }
     });
 
+    const exportedCounters: [string, any][] = counters.map(c => [
+      c.id,
+      {
+        id: c.id,
+        name: c.name,
+        title: c.name,
+        count: c.count,
+        value: c.count,
+        step: c.step,
+        pace: c.step,
+        color: c.color,
+        icon: c.icon,
+        order: c.order,
+      },
+    ]);
+
     return {
       metadata: {
         version: 1,
@@ -452,7 +490,7 @@ export class SyncService {
         tudus: Array.from(tudusMap.entries()),
         archivedTudus: Array.from(archivedTudusMap.entries()),
         unlistedTudus,
-        counters: counters.map(c => [c.id, c]),
+        counters: exportedCounters,
         settings,
       },
     };
