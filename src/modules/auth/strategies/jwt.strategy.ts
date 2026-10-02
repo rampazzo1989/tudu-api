@@ -17,10 +17,19 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     configService: ConfigService,
     private readonly prisma: PrismaService,
   ) {
+    const isProd = configService.get<string>('NODE_ENV') === 'production';
+    const secret = configService.get<string>('JWT_SECRET');
+
+    if (isProd && (!secret || secret.includes('super_secret_jwt_key'))) {
+      throw new Error(
+        'CRITICAL SECURITY CONFIGURATION ERROR: JWT_SECRET must be set to a secure, unique string in production environment!',
+      );
+    }
+
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: configService.get<string>('JWT_SECRET', 'tudu_super_secret_jwt_key_2026'),
+      secretOrKey: secret || 'tudu_super_secret_jwt_key_2026',
     });
   }
 

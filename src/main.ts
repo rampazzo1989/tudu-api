@@ -1,12 +1,21 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 
 async function bootstrap() {
   const logger = new Logger('TuduApi');
   const app = await NestFactory.create(AppModule);
+
+  // Security Headers via Helmet (relaxed CSP so Swagger UI /api/docs works)
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginEmbedderPolicy: false,
+    }),
+  );
 
   // Global Exception Filter
   app.useGlobalFilters(new AllExceptionsFilter());
@@ -21,9 +30,32 @@ async function bootstrap() {
     }),
   );
 
-  // Enable CORS for mobile and web clients
+  // CORS configuration: Safe for mobile emulators, native apps, and restrictive in production
+  const isProd = process.env.NODE_ENV === 'production';
+  const allowedOrigins = process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim())
+    : [];
+
   app.enableCors({
-    origin: '*',
+    origin: (origin, callback) => {
+      // Mobile apps (React Native), emulators, curl, and Postman do NOT send an Origin header
+      if (!origin) {
+        return callback(null, true);
+      }
+      // In local development, always permit any origin for convenience
+      if (!isProd) {
+        return callback(null, true);
+      }
+      // In production, validate against whitelist
+      if (
+        allowedOrigins.length === 0 ||
+        allowedOrigins.includes(origin) ||
+        allowedOrigins.includes('*')
+      ) {
+        return callback(null, true);
+      }
+      return callback(new Error(`Blocked by CORS: origin ${origin} not allowed`));
+    },
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
   });
@@ -42,9 +74,9 @@ async function bootstrap() {
   SwaggerModule.setup('api/docs', app, document);
 
   const port = process.env.PORT || 3000;
-  await app.listen(port);
-  logger.log(`🚀 Tudú API running on: http://localhost:${port}`);
-  logger.log(`📚 Swagger documentation at: http://localhost:${port}/api/docs`);
+  await app.listen(port, '0.0.0.0');
+  logger.log(`🚀 Tudú API running on: http://0.0.0.0:${port}`);
+  logger.log(`📚 Swagger documentation at: http://0.0.0.0:${port}/api/docs`);
 }
 
 bootstrap();

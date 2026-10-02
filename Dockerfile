@@ -25,14 +25,14 @@ RUN apk add --no-cache openssl libc6-compat
 
 WORKDIR /app
 
-ENV NODE_ENV=development
-
 # Copy package and install dependencies (including prisma for db push)
 COPY package*.json ./
 RUN npm ci
 
 COPY prisma ./prisma/
 RUN npx prisma generate
+
+ENV NODE_ENV=production
 
 COPY --from=builder /app/dist ./dist
 
