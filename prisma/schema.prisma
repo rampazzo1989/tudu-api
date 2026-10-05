@@ -64,19 +64,22 @@ model Subscription {
 }
 
 model List {
-  id         String    @id // Client-generated UUID
-  userId     String
-  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name       String
-  color      String?
-  icon       String?
-  order      Int       @default(0)
-  isArchived Boolean   @default(false)
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
-  deletedAt  DateTime? // Soft-delete tombstone for delta sync
+  id             String    @id // Client-generated UUID
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name           String
+  color          String?
+  icon           String?
+  order          Int       @default(0)
+  isArchived     Boolean   @default(false)
+  groupName      String?
+  sections       Json?
+  orderingPrompt String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime? // Soft-delete tombstone for delta sync
 
-  tasks      Task[]
+  tasks          Task[]
 
   @@index([userId, updatedAt])
   @@map("lists")
@@ -93,9 +96,12 @@ model Task {
   done        Boolean   @default(false)
   starred     Boolean   @default(false)
   dueDate     DateTime?
+  hasTime     Boolean   @default(false)
   order       Int       @default(0)
   isArchived  Boolean   @default(false)
   isUnlisted  Boolean   @default(false)
+  recurrence  String?
+  sectionId   String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?

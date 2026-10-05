@@ -27,6 +27,18 @@ export class SyncDeltaListDto {
   @IsOptional()
   isArchived?: boolean;
 
+  @IsString()
+  @IsOptional()
+  groupName?: string;
+
+  @IsArray()
+  @IsOptional()
+  sections?: any[];
+
+  @IsString()
+  @IsOptional()
+  orderingPrompt?: string;
+
   @IsNumber()
   updatedAt: number;
 
@@ -65,9 +77,24 @@ export class SyncDeltaTaskDto {
   @IsOptional()
   dueDate?: string;
 
+  @IsOptional()
+  hasTime?: boolean;
+
+  @IsString()
+  @IsOptional()
+  recurrence?: string;
+
+  @IsString()
+  @IsOptional()
+  sectionId?: string;
+
   @IsNumber()
   @IsOptional()
   order?: number;
+
+  @IsNumber()
+  @IsOptional()
+  scheduledOrder?: number;
 
   @IsOptional()
   isArchived?: boolean;

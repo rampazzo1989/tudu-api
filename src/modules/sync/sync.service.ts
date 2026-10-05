@@ -35,6 +35,9 @@ export class SyncService {
             icon: listObj.icon || null,
             order: typeof listObj.order === 'number' ? listObj.order : 0,
             isArchived: !!listObj.isArchived,
+            groupName: listObj.groupName || null,
+            sections: listObj.sections || null,
+            orderingPrompt: listObj.orderingPrompt || null,
             deletedAt: null,
           },
           create: {
@@ -45,6 +48,9 @@ export class SyncService {
             icon: listObj.icon || null,
             order: typeof listObj.order === 'number' ? listObj.order : 0,
             isArchived: !!listObj.isArchived,
+            groupName: listObj.groupName || null,
+            sections: listObj.sections || null,
+            orderingPrompt: listObj.orderingPrompt || null,
           },
         });
         importedLists++;
@@ -59,6 +65,7 @@ export class SyncService {
           if (!id) continue;
           const taskTitle = task?.title || task?.label;
           if (!taskTitle) continue;
+          const taskOrder = typeof task.scheduledOrder === 'number' ? task.scheduledOrder : (typeof task.order === 'number' ? task.order : 0);
           await tx.task.upsert({
             where: { id },
             update: {
@@ -68,9 +75,12 @@ export class SyncService {
               done: !!task.done,
               starred: !!task.starred,
               dueDate: task.dueDate ? new Date(task.dueDate) : null,
-              order: typeof task.order === 'number' ? task.order : 0,
+              hasTime: !!task.hasTime,
+              order: taskOrder,
               isArchived: !!task.isArchived,
               isUnlisted: false,
+              recurrence: task.recurrence || null,
+              sectionId: task.sectionId || null,
               deletedAt: null,
             },
             create: {
@@ -82,9 +92,12 @@ export class SyncService {
               done: !!task.done,
               starred: !!task.starred,
               dueDate: task.dueDate ? new Date(task.dueDate) : null,
-              order: typeof task.order === 'number' ? task.order : 0,
+              hasTime: !!task.hasTime,
+              order: taskOrder,
               isArchived: !!task.isArchived,
               isUnlisted: false,
+              recurrence: task.recurrence || null,
+              sectionId: task.sectionId || null,
             },
           });
           importedTasks++;
@@ -97,6 +110,7 @@ export class SyncService {
           if (!id) continue;
           const taskTitle = task?.title || task?.label;
           if (!taskTitle) continue;
+          const taskOrder = typeof task.scheduledOrder === 'number' ? task.scheduledOrder : (typeof task.order === 'number' ? task.order : 0);
           await tx.task.upsert({
             where: { id },
             update: {
@@ -105,8 +119,11 @@ export class SyncService {
               done: !!task.done,
               starred: !!task.starred,
               dueDate: task.dueDate ? new Date(task.dueDate) : null,
-              order: typeof task.order === 'number' ? task.order : 0,
+              hasTime: !!task.hasTime,
+              order: taskOrder,
               isUnlisted: true,
+              recurrence: task.recurrence || null,
+              sectionId: task.sectionId || null,
               deletedAt: null,
             },
             create: {
@@ -117,8 +134,11 @@ export class SyncService {
               done: !!task.done,
               starred: !!task.starred,
               dueDate: task.dueDate ? new Date(task.dueDate) : null,
-              order: typeof task.order === 'number' ? task.order : 0,
+              hasTime: !!task.hasTime,
+              order: taskOrder,
               isUnlisted: true,
+              recurrence: task.recurrence || null,
+              sectionId: task.sectionId || null,
             },
           });
           importedTasks++;
@@ -227,6 +247,9 @@ export class SyncService {
             icon: item.icon || null,
             order: item.order ?? 0,
             isArchived: !!item.isArchived,
+            groupName: item.groupName || null,
+            sections: item.sections || null,
+            orderingPrompt: item.orderingPrompt || null,
             deletedAt,
             updatedAt: new Date(item.updatedAt || Date.now()),
           },
@@ -238,6 +261,9 @@ export class SyncService {
             icon: item.icon || null,
             order: item.order ?? 0,
             isArchived: !!item.isArchived,
+            groupName: item.groupName || null,
+            sections: item.sections || null,
+            orderingPrompt: item.orderingPrompt || null,
             deletedAt,
             updatedAt: new Date(item.updatedAt || Date.now()),
           },
@@ -249,6 +275,7 @@ export class SyncService {
       for (const item of dto.tasks) {
         const deletedAt = item.deletedAt ? new Date(item.deletedAt) : null;
         const taskTitle = item.title || item.label || 'Tarefa';
+        const taskOrder = typeof item.scheduledOrder === 'number' ? item.scheduledOrder : (typeof item.order === 'number' ? item.order : 0);
         await this.prisma.task.upsert({
           where: { id: item.id },
           update: {
@@ -258,9 +285,12 @@ export class SyncService {
             done: !!item.done,
             starred: !!item.starred,
             dueDate: item.dueDate ? new Date(item.dueDate) : null,
-            order: item.order ?? 0,
+            hasTime: !!item.hasTime,
+            order: taskOrder,
             isArchived: !!item.isArchived,
             isUnlisted: !!item.isUnlisted,
+            recurrence: item.recurrence || null,
+            sectionId: item.sectionId || null,
             deletedAt,
             updatedAt: new Date(item.updatedAt || Date.now()),
           },
@@ -273,9 +303,12 @@ export class SyncService {
             done: !!item.done,
             starred: !!item.starred,
             dueDate: item.dueDate ? new Date(item.dueDate) : null,
-            order: item.order ?? 0,
+            hasTime: !!item.hasTime,
+            order: taskOrder,
             isArchived: !!item.isArchived,
             isUnlisted: !!item.isUnlisted,
+            recurrence: item.recurrence || null,
+            sectionId: item.sectionId || null,
             deletedAt,
             updatedAt: new Date(item.updatedAt || Date.now()),
           },
@@ -366,12 +399,19 @@ export class SyncService {
         lists: remoteLists.map(l => ({
           ...l,
           label: l.name,
+          groupName: l.groupName || undefined,
+          sections: l.sections || undefined,
+          orderingPrompt: l.orderingPrompt || undefined,
           updatedAt: l.updatedAt.getTime(),
           deletedAt: l.deletedAt ? l.deletedAt.getTime() : null,
         })),
         tasks: remoteTasks.map(t => ({
           ...t,
           label: t.title,
+          scheduledOrder: t.order,
+          hasTime: t.hasTime,
+          recurrence: t.recurrence || undefined,
+          sectionId: t.sectionId || undefined,
           dueDate: t.dueDate ? t.dueDate.toISOString() : null,
           updatedAt: t.updatedAt.getTime(),
           deletedAt: t.deletedAt ? t.deletedAt.getTime() : null,
@@ -423,6 +463,9 @@ export class SyncService {
           icon: l.icon,
           order: l.order,
           isArchived: l.isArchived,
+          groupName: l.groupName || undefined,
+          sections: l.sections || undefined,
+          orderingPrompt: l.orderingPrompt || undefined,
         },
       ];
       if (l.isArchived) {
@@ -445,7 +488,11 @@ export class SyncService {
         done: t.done,
         starred: t.starred,
         dueDate: t.dueDate ? t.dueDate.toISOString() : undefined,
+        hasTime: t.hasTime,
         order: t.order,
+        scheduledOrder: t.order,
+        recurrence: t.recurrence || undefined,
+        sectionId: t.sectionId || undefined,
         isArchived: t.isArchived,
       };
 
