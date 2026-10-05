@@ -36,17 +36,42 @@ export class AuthService {
       const clientId = this.configService.get<string>('GOOGLE_CLIENT_ID');
 
       if (clientId && !dto.idToken.startsWith('mock_')) {
-        const ticket = await this.googleClient.verifyIdToken({
-          idToken: dto.idToken,
-          audience: clientId,
-        });
-        const payload = ticket.getPayload();
-        email = payload?.email;
-        name = payload?.name;
-        picture = payload?.picture;
-        sub = payload?.sub;
-      } else {
-        // Fallback for dev / mock testing
+        try {
+          const ticket = await this.googleClient.verifyIdToken({
+            idToken: dto.idToken,
+            audience: clientId,
+          });
+          const payload = ticket.getPayload();
+          email = payload?.email;
+          name = payload?.name;
+          picture = payload?.picture;
+          sub = payload?.sub;
+        } catch (idErr: any) {
+          this.logger.warn(`verifyIdToken failed, trying userinfo API: ${idErr?.message}`);
+        }
+      }
+
+      // If not yet verified (e.g. token is an OAuth access token or clientId not configured),
+      // verify directly with Google's userinfo endpoint:
+      if (!email && !dto.idToken.startsWith('mock_')) {
+        try {
+          const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+            headers: { Authorization: `Bearer ${dto.idToken}` },
+          });
+          if (res.ok) {
+            const data: any = await res.json();
+            email = data.email;
+            name = data.name;
+            picture = data.picture;
+            sub = data.sub;
+          }
+        } catch (fetchErr: any) {
+          this.logger.warn(`Google userinfo fetch failed: ${fetchErr?.message}`);
+        }
+      }
+
+      // Fallback for dev / mock testing if still unresolved
+      if (!email) {
         try {
           const parts = dto.idToken.split('.');
           if (parts.length === 3) {
