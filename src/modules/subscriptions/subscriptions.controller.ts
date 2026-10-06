@@ -46,6 +46,15 @@ export class SubscriptionsController {
     return this.subscriptionsService.getSubscriptionStatus(user.id);
   }
 
+  @Post('subscriptions/sync')
+  @UseGuards(JwtAuthGuard)
+  async syncSubscription(
+    @CurrentUser() user: CurrentUserData,
+    @Body() dto: { isPro: boolean; status?: string; planId?: string },
+  ) {
+    return this.subscriptionsService.syncClientSubscription(user.id, dto);
+  }
+
   @Post('subscriptions/dev-activate')
   @UseGuards(JwtAuthGuard)
   async devActivate(

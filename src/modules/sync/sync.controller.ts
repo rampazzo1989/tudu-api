@@ -7,13 +7,14 @@ import { SubscriptionGuard } from '../../common/guards/subscription.guard';
 import { CurrentUser, CurrentUserData } from '../../common/decorators/current-user.decorator';
 
 @Controller('api/v1/sync')
-@UseGuards(JwtAuthGuard, SubscriptionGuard)
+@UseGuards(JwtAuthGuard)
 export class SyncController {
   private readonly logger = new Logger(SyncController.name);
 
   constructor(private readonly syncService: SyncService) {}
 
   @Post('snapshot')
+  @UseGuards(SubscriptionGuard)
   @HttpCode(HttpStatus.OK)
   async importSnapshot(
     @CurrentUser() user: CurrentUserData,
@@ -33,6 +34,7 @@ export class SyncController {
   }
 
   @Post('delta')
+  @UseGuards(SubscriptionGuard)
   @HttpCode(HttpStatus.OK)
   async syncDelta(
     @CurrentUser() user: CurrentUserData,

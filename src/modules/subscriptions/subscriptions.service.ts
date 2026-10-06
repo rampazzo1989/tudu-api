@@ -123,4 +123,52 @@ export class SubscriptionsService {
 
     return { success: true, subscription };
   }
+
+  async syncClientSubscription(
+    userId: string,
+    dto: { isPro: boolean; status?: string; planId?: string },
+  ) {
+    if (!dto.isPro) {
+      return this.getSubscriptionStatus(userId);
+    }
+
+    const now = new Date();
+    const periodEndsAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const newStatus =
+      dto.status === 'TRIALING'
+        ? SubscriptionStatus.TRIALING
+        : SubscriptionStatus.ACTIVE;
+
+    const subscription = await this.prisma.subscription.upsert({
+      where: { userId },
+      update: {
+        status: newStatus,
+        planId: dto.planId || 'tudu_pro_monthly',
+        currentPeriodEndsAt: periodEndsAt,
+      },
+      create: {
+        userId,
+        status: newStatus,
+        planId: dto.planId || 'tudu_pro_monthly',
+        priceCents: 490,
+        currency: 'BRL',
+        trialStartsAt: newStatus === SubscriptionStatus.TRIALING ? now : null,
+        trialEndsAt: newStatus === SubscriptionStatus.TRIALING ? periodEndsAt : null,
+        currentPeriodStartsAt: now,
+        currentPeriodEndsAt: periodEndsAt,
+        originalPurchaseDate: now,
+      },
+    });
+
+    this.logger.log(`[SubscriptionSync] Client synced Pro subscription for user ${userId} (${newStatus})`);
+
+    return {
+      isPro: true,
+      status: subscription.status,
+      planId: subscription.planId,
+      price: 'R$ 4,90/mês',
+      trialEndsAt: subscription.trialEndsAt,
+      currentPeriodEndsAt: subscription.currentPeriodEndsAt,
+    };
+  }
 }
