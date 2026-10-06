@@ -227,126 +227,223 @@ export class SyncService {
     };
   }
 
+  private parseTimestamp(val: any): Date {
+    if (!val) return new Date();
+    const d = new Date(val);
+    return isNaN(d.getTime()) ? new Date() : d;
+  }
+
   /**
-   * Bidirectional incremental delta sync using Last-Write-Wins.
+   * Bidirectional incremental delta sync using Last-Write-Wins with timestamp protection.
    */
   async syncDelta(userId: string, dto: SyncDeltaDto) {
     const serverTimestamp = Date.now();
     const lastSyncDate = new Date(dto.lastSyncTimestamp || 0);
 
-    // 1. Apply Incoming Mutations from Client
+    const conflictListIds: string[] = [];
+    const conflictTaskIds: string[] = [];
+    const conflictCounterIds: string[] = [];
+
+    // 1. Apply Incoming Mutations from Client with Timestamp Protection
     if (dto.lists && dto.lists.length > 0) {
       for (const item of dto.lists) {
-        const deletedAt = item.deletedAt ? new Date(item.deletedAt) : null;
+        const deletedAt = item.deletedAt ? this.parseTimestamp(item.deletedAt) : null;
         const listName = item.name || item.label || 'Lista';
-        await this.prisma.list.upsert({
+        const incomingUpdatedAt = this.parseTimestamp(item.updatedAt);
+
+        const existing = await this.prisma.list.findUnique({
           where: { id: item.id },
-          update: {
-            name: listName,
-            color: item.color || null,
-            icon: item.icon || null,
-            order: item.order ?? 0,
-            isArchived: !!item.isArchived,
-            groupName: item.groupName || null,
-            sections: item.sections || null,
-            orderingPrompt: item.orderingPrompt || null,
-            deletedAt,
-            updatedAt: new Date(item.updatedAt || Date.now()),
-          },
-          create: {
-            id: item.id,
-            userId,
-            name: listName,
-            color: item.color || null,
-            icon: item.icon || null,
-            order: item.order ?? 0,
-            isArchived: !!item.isArchived,
-            groupName: item.groupName || null,
-            sections: item.sections || null,
-            orderingPrompt: item.orderingPrompt || null,
-            deletedAt,
-            updatedAt: new Date(item.updatedAt || Date.now()),
-          },
         });
+
+        if (existing) {
+          if (existing.userId !== userId) {
+            this.logger.warn(`User ${userId} attempted to mutate list ${item.id} belonging to another user`);
+            continue;
+          }
+
+          // Conflict resolution (Last-Write-Wins):
+          // If server's existing record is strictly newer than incoming mutation, skip updating!
+          if (existing.updatedAt && existing.updatedAt.getTime() > incomingUpdatedAt.getTime()) {
+            this.logger.log(
+              `[Conflict] Skipping list ${item.id}: DB record (${existing.updatedAt.toISOString()}) is newer than incoming (${incomingUpdatedAt.toISOString()})`,
+            );
+            conflictListIds.push(item.id);
+            continue;
+          }
+
+          await this.prisma.list.update({
+            where: { id: item.id },
+            data: {
+              name: listName,
+              color: item.color || null,
+              icon: item.icon || null,
+              order: item.order ?? 0,
+              isArchived: !!item.isArchived,
+              groupName: item.groupName || null,
+              sections: item.sections || null,
+              orderingPrompt: item.orderingPrompt || null,
+              deletedAt,
+              updatedAt: incomingUpdatedAt,
+            },
+          });
+        } else {
+          await this.prisma.list.create({
+            data: {
+              id: item.id,
+              userId,
+              name: listName,
+              color: item.color || null,
+              icon: item.icon || null,
+              order: item.order ?? 0,
+              isArchived: !!item.isArchived,
+              groupName: item.groupName || null,
+              sections: item.sections || null,
+              orderingPrompt: item.orderingPrompt || null,
+              deletedAt,
+              updatedAt: incomingUpdatedAt,
+            },
+          });
+        }
       }
     }
 
     if (dto.tasks && dto.tasks.length > 0) {
       for (const item of dto.tasks) {
-        const deletedAt = item.deletedAt ? new Date(item.deletedAt) : null;
+        const deletedAt = item.deletedAt ? this.parseTimestamp(item.deletedAt) : null;
         const taskTitle = item.title || item.label || 'Tarefa';
-        const taskOrder = typeof item.scheduledOrder === 'number' ? item.scheduledOrder : (typeof item.order === 'number' ? item.order : 0);
-        await this.prisma.task.upsert({
+        const taskOrder =
+          typeof item.scheduledOrder === 'number'
+            ? item.scheduledOrder
+            : (typeof item.order === 'number' ? item.order : 0);
+        const incomingUpdatedAt = this.parseTimestamp(item.updatedAt);
+
+        const existing = await this.prisma.task.findUnique({
           where: { id: item.id },
-          update: {
-            listId: item.listId || null,
-            title: taskTitle,
-            description: item.description || null,
-            done: !!item.done,
-            starred: !!item.starred,
-            dueDate: item.dueDate ? new Date(item.dueDate) : null,
-            hasTime: !!item.hasTime,
-            order: taskOrder,
-            isArchived: !!item.isArchived,
-            isUnlisted: !!item.isUnlisted,
-            recurrence: item.recurrence || null,
-            sectionId: item.sectionId || null,
-            deletedAt,
-            updatedAt: new Date(item.updatedAt || Date.now()),
-          },
-          create: {
-            id: item.id,
-            userId,
-            listId: item.listId || null,
-            title: taskTitle,
-            description: item.description || null,
-            done: !!item.done,
-            starred: !!item.starred,
-            dueDate: item.dueDate ? new Date(item.dueDate) : null,
-            hasTime: !!item.hasTime,
-            order: taskOrder,
-            isArchived: !!item.isArchived,
-            isUnlisted: !!item.isUnlisted,
-            recurrence: item.recurrence || null,
-            sectionId: item.sectionId || null,
-            deletedAt,
-            updatedAt: new Date(item.updatedAt || Date.now()),
-          },
         });
+
+        if (existing) {
+          if (existing.userId !== userId) {
+            this.logger.warn(`User ${userId} attempted to mutate task ${item.id} belonging to another user`);
+            continue;
+          }
+
+          // Conflict resolution (Last-Write-Wins):
+          // If server's existing record is strictly newer than incoming mutation, skip updating!
+          if (existing.updatedAt && existing.updatedAt.getTime() > incomingUpdatedAt.getTime()) {
+            this.logger.log(
+              `[Conflict] Skipping task ${item.id}: DB record (${existing.updatedAt.toISOString()}) is newer than incoming (${incomingUpdatedAt.toISOString()})`,
+            );
+            conflictTaskIds.push(item.id);
+            continue;
+          }
+
+          await this.prisma.task.update({
+            where: { id: item.id },
+            data: {
+              listId: item.listId || null,
+              title: taskTitle,
+              description: item.description || null,
+              done: !!item.done,
+              starred: !!item.starred,
+              dueDate: item.dueDate ? new Date(item.dueDate) : null,
+              hasTime: !!item.hasTime,
+              order: taskOrder,
+              isArchived: !!item.isArchived,
+              isUnlisted: !!item.isUnlisted,
+              recurrence: item.recurrence || null,
+              sectionId: item.sectionId || null,
+              deletedAt,
+              updatedAt: incomingUpdatedAt,
+            },
+          });
+        } else {
+          await this.prisma.task.create({
+            data: {
+              id: item.id,
+              userId,
+              listId: item.listId || null,
+              title: taskTitle,
+              description: item.description || null,
+              done: !!item.done,
+              starred: !!item.starred,
+              dueDate: item.dueDate ? new Date(item.dueDate) : null,
+              hasTime: !!item.hasTime,
+              order: taskOrder,
+              isArchived: !!item.isArchived,
+              isUnlisted: !!item.isUnlisted,
+              recurrence: item.recurrence || null,
+              sectionId: item.sectionId || null,
+              deletedAt,
+              updatedAt: incomingUpdatedAt,
+            },
+          });
+        }
       }
     }
 
     if (dto.counters && dto.counters.length > 0) {
       for (const item of dto.counters) {
-        const deletedAt = item.deletedAt ? new Date(item.deletedAt) : null;
+        const deletedAt = item.deletedAt ? this.parseTimestamp(item.deletedAt) : null;
         const counterName = item.name || item.title || 'Contador';
-        const count = typeof item.count === 'number' ? item.count : (typeof item.value === 'number' ? item.value : 0);
-        const step = typeof item.step === 'number' ? item.step : (typeof item.pace === 'number' ? item.pace : 1);
-        await this.prisma.counter.upsert({
+        const count =
+          typeof item.count === 'number'
+            ? item.count
+            : (typeof item.value === 'number' ? item.value : 0);
+        const step =
+          typeof item.step === 'number'
+            ? item.step
+            : (typeof item.pace === 'number' ? item.pace : 1);
+        const incomingUpdatedAt = this.parseTimestamp(item.updatedAt);
+
+        const existing = await this.prisma.counter.findUnique({
           where: { id: item.id },
-          update: {
-            name: counterName,
-            count,
-            step,
-            color: item.color || null,
-            icon: item.icon || null,
-            order: item.order ?? 0,
-            deletedAt,
-            updatedAt: new Date(item.updatedAt || Date.now()),
-          },
-          create: {
-            id: item.id,
-            userId,
-            name: counterName,
-            count,
-            step,
-            color: item.color || null,
-            icon: item.icon || null,
-            order: item.order ?? 0,
-            deletedAt,
-            updatedAt: new Date(item.updatedAt || Date.now()),
-          },
         });
+
+        if (existing) {
+          if (existing.userId !== userId) {
+            this.logger.warn(`User ${userId} attempted to mutate counter ${item.id} belonging to another user`);
+            continue;
+          }
+
+          // Conflict resolution (Last-Write-Wins):
+          // If server's existing record is strictly newer than incoming mutation, skip updating!
+          if (existing.updatedAt && existing.updatedAt.getTime() > incomingUpdatedAt.getTime()) {
+            this.logger.log(
+              `[Conflict] Skipping counter ${item.id}: DB record (${existing.updatedAt.toISOString()}) is newer than incoming (${incomingUpdatedAt.toISOString()})`,
+            );
+            conflictCounterIds.push(item.id);
+            continue;
+          }
+
+          await this.prisma.counter.update({
+            where: { id: item.id },
+            data: {
+              name: counterName,
+              count,
+              step,
+              color: item.color || null,
+              icon: item.icon || null,
+              order: item.order ?? 0,
+              deletedAt,
+              updatedAt: incomingUpdatedAt,
+            },
+          });
+        } else {
+          await this.prisma.counter.create({
+            data: {
+              id: item.id,
+              userId,
+              name: counterName,
+              count,
+              step,
+              color: item.color || null,
+              icon: item.icon || null,
+              order: item.order ?? 0,
+              deletedAt,
+              updatedAt: incomingUpdatedAt,
+            },
+          });
+        }
       }
     }
 
@@ -367,25 +464,34 @@ export class SyncService {
       });
     }
 
-    // 2. Fetch Remote Changes Since lastSyncDate
+    // 2. Fetch Remote Changes Since lastSyncDate (plus any items that had conflicts)
     const remoteLists = await this.prisma.list.findMany({
       where: {
         userId,
-        updatedAt: { gt: lastSyncDate },
+        OR: [
+          { updatedAt: { gt: lastSyncDate } },
+          ...(conflictListIds.length > 0 ? [{ id: { in: conflictListIds } }] : []),
+        ],
       },
     });
 
     const remoteTasks = await this.prisma.task.findMany({
       where: {
         userId,
-        updatedAt: { gt: lastSyncDate },
+        OR: [
+          { updatedAt: { gt: lastSyncDate } },
+          ...(conflictTaskIds.length > 0 ? [{ id: { in: conflictTaskIds } }] : []),
+        ],
       },
     });
 
     const remoteCounters = await this.prisma.counter.findMany({
       where: {
         userId,
-        updatedAt: { gt: lastSyncDate },
+        OR: [
+          { updatedAt: { gt: lastSyncDate } },
+          ...(conflictCounterIds.length > 0 ? [{ id: { in: conflictCounterIds } }] : []),
+        ],
       },
     });
 

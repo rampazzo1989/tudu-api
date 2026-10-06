@@ -20,14 +20,23 @@ describe('SyncService (Offline-First Cloud Sync)', () => {
       list: {
         upsert: jest.fn(),
         findMany: jest.fn(),
+        findUnique: jest.fn(),
+        update: jest.fn(),
+        create: jest.fn(),
       },
       task: {
         upsert: jest.fn(),
         findMany: jest.fn(),
+        findUnique: jest.fn(),
+        update: jest.fn(),
+        create: jest.fn(),
       },
       counter: {
         upsert: jest.fn(),
         findMany: jest.fn(),
+        findUnique: jest.fn(),
+        update: jest.fn(),
+        create: jest.fn(),
       },
       userSettings: {
         upsert: jest.fn(),
@@ -81,7 +90,7 @@ describe('SyncService (Offline-First Cloud Sync)', () => {
   });
 
   describe('syncDelta', () => {
-    it('should process client delta mutations and fetch server changes', async () => {
+    it('should create items when they do not exist in DB', async () => {
       const deltaDto = {
         lastSyncTimestamp: 1700000000000,
         lists: [
@@ -102,8 +111,10 @@ describe('SyncService (Offline-First Cloud Sync)', () => {
       };
 
       const now = new Date();
-      mockPrisma.list.upsert.mockResolvedValue({});
-      mockPrisma.task.upsert.mockResolvedValue({});
+      mockPrisma.list.findUnique.mockResolvedValue(null);
+      mockPrisma.task.findUnique.mockResolvedValue(null);
+      mockPrisma.list.create.mockResolvedValue({});
+      mockPrisma.task.create.mockResolvedValue({});
       mockPrisma.list.findMany.mockResolvedValue([
         {
           id: 'list-remote',
@@ -122,11 +133,96 @@ describe('SyncService (Offline-First Cloud Sync)', () => {
       expect(response.syncTimestamp).toBeDefined();
       expect(response.delta.lists.length).toBe(1);
       expect(response.delta.lists[0].id).toBe('list-remote');
-      expect(mockPrisma.list.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: 'list-10' } }),
+      expect(mockPrisma.list.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ id: 'list-10' }) }),
       );
-      expect(mockPrisma.task.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: 'task-10' } }),
+      expect(mockPrisma.task.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ id: 'task-10' }) }),
+      );
+    });
+
+    it('should update item when incoming timestamp is newer than existing record in DB', async () => {
+      const deltaDto = {
+        lastSyncTimestamp: 1700000000000,
+        tasks: [
+          {
+            id: 'task-10',
+            title: 'Título Novo do Cliente',
+            done: true,
+            updatedAt: 1700000060000,
+          },
+        ],
+      };
+
+      mockPrisma.task.findUnique.mockResolvedValue({
+        id: 'task-10',
+        userId: 'user-1',
+        title: 'Título Antigo do Banco',
+        updatedAt: new Date(1700000050000), // DB is older than client (50000 < 60000)
+      });
+      mockPrisma.task.update.mockResolvedValue({});
+      mockPrisma.list.findMany.mockResolvedValue([]);
+      mockPrisma.task.findMany.mockResolvedValue([]);
+      mockPrisma.counter.findMany.mockResolvedValue([]);
+      mockPrisma.userSettings.findUnique.mockResolvedValue(null);
+
+      await service.syncDelta('user-1', deltaDto);
+
+      expect(mockPrisma.task.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'task-10' },
+          data: expect.objectContaining({ title: 'Título Novo do Cliente' }),
+        }),
+      );
+    });
+
+    it('should skip update and preserve DB record when existing DB timestamp is newer (Last-Write-Wins conflict protection)', async () => {
+      const deltaDto = {
+        lastSyncTimestamp: 1700000000000,
+        tasks: [
+          {
+            id: 'task-conflict',
+            title: 'Edição Desatualizada do Cliente',
+            updatedAt: 1700000040000,
+          },
+        ],
+      };
+
+      const dbUpdatedAt = new Date(1700000090000); // DB is NEWER (90000 > 40000)
+      mockPrisma.task.findUnique.mockResolvedValue({
+        id: 'task-conflict',
+        userId: 'user-1',
+        title: 'Edição Mais Recente Feita na Web',
+        updatedAt: dbUpdatedAt,
+      });
+      mockPrisma.task.update.mockResolvedValue({});
+      mockPrisma.list.findMany.mockResolvedValue([]);
+      mockPrisma.task.findMany.mockResolvedValue([
+        {
+          id: 'task-conflict',
+          userId: 'user-1',
+          title: 'Edição Mais Recente Feita na Web',
+          updatedAt: dbUpdatedAt,
+        },
+      ]);
+      mockPrisma.counter.findMany.mockResolvedValue([]);
+      mockPrisma.userSettings.findUnique.mockResolvedValue(null);
+
+      const response = await service.syncDelta('user-1', deltaDto);
+
+      // Verify client's outdated update was rejected
+      expect(mockPrisma.task.update).not.toHaveBeenCalled();
+      // Verify authoritative DB record is included in delta returned to client
+      expect(response.delta.tasks.some(t => t.id === 'task-conflict')).toBe(true);
+      expect(mockPrisma.task.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            userId: 'user-1',
+            OR: expect.arrayContaining([
+              { id: { in: ['task-conflict'] } },
+            ]),
+          }),
+        }),
       );
     });
 
@@ -144,7 +240,13 @@ describe('SyncService (Offline-First Cloud Sync)', () => {
         ],
       };
 
-      mockPrisma.list.upsert.mockResolvedValue({});
+      mockPrisma.list.findUnique.mockResolvedValue({
+        id: 'list-deleted',
+        userId: 'user-1',
+        name: 'Lista Ativa',
+        updatedAt: new Date(deletedAt - 1000),
+      });
+      mockPrisma.list.update.mockResolvedValue({});
       mockPrisma.list.findMany.mockResolvedValue([]);
       mockPrisma.task.findMany.mockResolvedValue([]);
       mockPrisma.counter.findMany.mockResolvedValue([]);
@@ -152,10 +254,10 @@ describe('SyncService (Offline-First Cloud Sync)', () => {
 
       await service.syncDelta('user-1', deltaDto);
 
-      expect(mockPrisma.list.upsert).toHaveBeenCalledWith(
+      expect(mockPrisma.list.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 'list-deleted' },
-          update: expect.objectContaining({ deletedAt: new Date(deletedAt) }),
+          data: expect.objectContaining({ deletedAt: new Date(deletedAt) }),
         }),
       );
     });
