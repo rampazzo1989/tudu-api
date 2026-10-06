@@ -244,16 +244,23 @@ export class SyncService {
     const conflictTaskIds: string[] = [];
     const conflictCounterIds: string[] = [];
 
-    // 1. Apply Incoming Mutations from Client with Timestamp Protection
+    // 1. Apply Incoming Mutations from Client with Timestamp Protection (Batch Processed)
     if (dto.lists && dto.lists.length > 0) {
+      const listIds = dto.lists.map(l => l.id);
+      const existingLists = await this.prisma.list.findMany({
+        where: { id: { in: listIds } },
+      });
+      const existingMap = new Map(existingLists.map(l => [l.id, l]));
+
+      const listCreates: any[] = [];
+      const listUpdates: any[] = [];
+
       for (const item of dto.lists) {
         const deletedAt = item.deletedAt ? this.parseTimestamp(item.deletedAt) : null;
         const listName = item.name || item.label || 'Lista';
         const incomingUpdatedAt = this.parseTimestamp(item.updatedAt);
 
-        const existing = await this.prisma.list.findUnique({
-          where: { id: item.id },
-        });
+        const existing = existingMap.get(item.id);
 
         if (existing) {
           if (existing.userId !== userId) {
@@ -261,8 +268,6 @@ export class SyncService {
             continue;
           }
 
-          // Conflict resolution (Last-Write-Wins):
-          // If server's existing record is strictly newer than incoming mutation, skip updating!
           if (existing.updatedAt && existing.updatedAt.getTime() > incomingUpdatedAt.getTime()) {
             this.logger.log(
               `[Conflict] Skipping list ${item.id}: DB record (${existing.updatedAt.toISOString()}) is newer than incoming (${incomingUpdatedAt.toISOString()})`,
@@ -271,43 +276,59 @@ export class SyncService {
             continue;
           }
 
-          await this.prisma.list.update({
-            where: { id: item.id },
-            data: {
-              name: listName,
-              color: item.color || null,
-              icon: item.icon || null,
-              order: item.order ?? 0,
-              isArchived: !!item.isArchived,
-              groupName: item.groupName || null,
-              sections: item.sections || null,
-              orderingPrompt: item.orderingPrompt || null,
-              deletedAt,
-              updatedAt: incomingUpdatedAt,
-            },
-          });
+          listUpdates.push(
+            this.prisma.list.update({
+              where: { id: item.id },
+              data: {
+                name: listName,
+                color: item.color || null,
+                icon: item.icon || null,
+                order: item.order ?? 0,
+                isArchived: !!item.isArchived,
+                groupName: item.groupName || null,
+                sections: item.sections || null,
+                orderingPrompt: item.orderingPrompt || null,
+                deletedAt,
+                updatedAt: incomingUpdatedAt,
+              },
+            }),
+          );
         } else {
-          await this.prisma.list.create({
-            data: {
-              id: item.id,
-              userId,
-              name: listName,
-              color: item.color || null,
-              icon: item.icon || null,
-              order: item.order ?? 0,
-              isArchived: !!item.isArchived,
-              groupName: item.groupName || null,
-              sections: item.sections || null,
-              orderingPrompt: item.orderingPrompt || null,
-              deletedAt,
-              updatedAt: incomingUpdatedAt,
-            },
+          listCreates.push({
+            id: item.id,
+            userId,
+            name: listName,
+            color: item.color || null,
+            icon: item.icon || null,
+            order: item.order ?? 0,
+            isArchived: !!item.isArchived,
+            groupName: item.groupName || null,
+            sections: item.sections || null,
+            orderingPrompt: item.orderingPrompt || null,
+            deletedAt,
+            updatedAt: incomingUpdatedAt,
           });
         }
+      }
+
+      if (listCreates.length > 0) {
+        await this.prisma.list.createMany({ data: listCreates, skipDuplicates: true });
+      }
+      if (listUpdates.length > 0) {
+        await this.prisma.$transaction(listUpdates);
       }
     }
 
     if (dto.tasks && dto.tasks.length > 0) {
+      const taskIds = dto.tasks.map(t => t.id);
+      const existingTasks = await this.prisma.task.findMany({
+        where: { id: { in: taskIds } },
+      });
+      const existingMap = new Map(existingTasks.map(t => [t.id, t]));
+
+      const taskCreates: any[] = [];
+      const taskUpdates: any[] = [];
+
       for (const item of dto.tasks) {
         const deletedAt = item.deletedAt ? this.parseTimestamp(item.deletedAt) : null;
         const taskTitle = item.title || item.label || 'Tarefa';
@@ -317,9 +338,7 @@ export class SyncService {
             : (typeof item.order === 'number' ? item.order : 0);
         const incomingUpdatedAt = this.parseTimestamp(item.updatedAt);
 
-        const existing = await this.prisma.task.findUnique({
-          where: { id: item.id },
-        });
+        const existing = existingMap.get(item.id);
 
         if (existing) {
           if (existing.userId !== userId) {
@@ -327,8 +346,6 @@ export class SyncService {
             continue;
           }
 
-          // Conflict resolution (Last-Write-Wins):
-          // If server's existing record is strictly newer than incoming mutation, skip updating!
           if (existing.updatedAt && existing.updatedAt.getTime() > incomingUpdatedAt.getTime()) {
             this.logger.log(
               `[Conflict] Skipping task ${item.id}: DB record (${existing.updatedAt.toISOString()}) is newer than incoming (${incomingUpdatedAt.toISOString()})`,
@@ -337,51 +354,67 @@ export class SyncService {
             continue;
           }
 
-          await this.prisma.task.update({
-            where: { id: item.id },
-            data: {
-              listId: item.listId || null,
-              title: taskTitle,
-              description: item.description || null,
-              done: !!item.done,
-              starred: !!item.starred,
-              dueDate: item.dueDate ? new Date(item.dueDate) : null,
-              hasTime: !!item.hasTime,
-              order: taskOrder,
-              isArchived: !!item.isArchived,
-              isUnlisted: !!item.isUnlisted,
-              recurrence: item.recurrence || null,
-              sectionId: item.sectionId || null,
-              deletedAt,
-              updatedAt: incomingUpdatedAt,
-            },
-          });
+          taskUpdates.push(
+            this.prisma.task.update({
+              where: { id: item.id },
+              data: {
+                listId: item.listId || null,
+                title: taskTitle,
+                description: item.description || null,
+                done: !!item.done,
+                starred: !!item.starred,
+                dueDate: item.dueDate ? new Date(item.dueDate) : null,
+                hasTime: !!item.hasTime,
+                order: taskOrder,
+                isArchived: !!item.isArchived,
+                isUnlisted: !!item.isUnlisted,
+                recurrence: item.recurrence || null,
+                sectionId: item.sectionId || null,
+                deletedAt,
+                updatedAt: incomingUpdatedAt,
+              },
+            }),
+          );
         } else {
-          await this.prisma.task.create({
-            data: {
-              id: item.id,
-              userId,
-              listId: item.listId || null,
-              title: taskTitle,
-              description: item.description || null,
-              done: !!item.done,
-              starred: !!item.starred,
-              dueDate: item.dueDate ? new Date(item.dueDate) : null,
-              hasTime: !!item.hasTime,
-              order: taskOrder,
-              isArchived: !!item.isArchived,
-              isUnlisted: !!item.isUnlisted,
-              recurrence: item.recurrence || null,
-              sectionId: item.sectionId || null,
-              deletedAt,
-              updatedAt: incomingUpdatedAt,
-            },
+          taskCreates.push({
+            id: item.id,
+            userId,
+            listId: item.listId || null,
+            title: taskTitle,
+            description: item.description || null,
+            done: !!item.done,
+            starred: !!item.starred,
+            dueDate: item.dueDate ? new Date(item.dueDate) : null,
+            hasTime: !!item.hasTime,
+            order: taskOrder,
+            isArchived: !!item.isArchived,
+            isUnlisted: !!item.isUnlisted,
+            recurrence: item.recurrence || null,
+            sectionId: item.sectionId || null,
+            deletedAt,
+            updatedAt: incomingUpdatedAt,
           });
         }
+      }
+
+      if (taskCreates.length > 0) {
+        await this.prisma.task.createMany({ data: taskCreates, skipDuplicates: true });
+      }
+      if (taskUpdates.length > 0) {
+        await this.prisma.$transaction(taskUpdates);
       }
     }
 
     if (dto.counters && dto.counters.length > 0) {
+      const counterIds = dto.counters.map(c => c.id);
+      const existingCounters = await this.prisma.counter.findMany({
+        where: { id: { in: counterIds } },
+      });
+      const existingMap = new Map(existingCounters.map(c => [c.id, c]));
+
+      const counterCreates: any[] = [];
+      const counterUpdates: any[] = [];
+
       for (const item of dto.counters) {
         const deletedAt = item.deletedAt ? this.parseTimestamp(item.deletedAt) : null;
         const counterName = item.name || item.title || 'Contador';
@@ -395,9 +428,7 @@ export class SyncService {
             : (typeof item.pace === 'number' ? item.pace : 1);
         const incomingUpdatedAt = this.parseTimestamp(item.updatedAt);
 
-        const existing = await this.prisma.counter.findUnique({
-          where: { id: item.id },
-        });
+        const existing = existingMap.get(item.id);
 
         if (existing) {
           if (existing.userId !== userId) {
@@ -405,8 +436,6 @@ export class SyncService {
             continue;
           }
 
-          // Conflict resolution (Last-Write-Wins):
-          // If server's existing record is strictly newer than incoming mutation, skip updating!
           if (existing.updatedAt && existing.updatedAt.getTime() > incomingUpdatedAt.getTime()) {
             this.logger.log(
               `[Conflict] Skipping counter ${item.id}: DB record (${existing.updatedAt.toISOString()}) is newer than incoming (${incomingUpdatedAt.toISOString()})`,
@@ -415,35 +444,42 @@ export class SyncService {
             continue;
           }
 
-          await this.prisma.counter.update({
-            where: { id: item.id },
-            data: {
-              name: counterName,
-              count,
-              step,
-              color: item.color || null,
-              icon: item.icon || null,
-              order: item.order ?? 0,
-              deletedAt,
-              updatedAt: incomingUpdatedAt,
-            },
-          });
+          counterUpdates.push(
+            this.prisma.counter.update({
+              where: { id: item.id },
+              data: {
+                name: counterName,
+                count,
+                step,
+                color: item.color || null,
+                icon: item.icon || null,
+                order: item.order ?? 0,
+                deletedAt,
+                updatedAt: incomingUpdatedAt,
+              },
+            }),
+          );
         } else {
-          await this.prisma.counter.create({
-            data: {
-              id: item.id,
-              userId,
-              name: counterName,
-              count,
-              step,
-              color: item.color || null,
-              icon: item.icon || null,
-              order: item.order ?? 0,
-              deletedAt,
-              updatedAt: incomingUpdatedAt,
-            },
+          counterCreates.push({
+            id: item.id,
+            userId,
+            name: counterName,
+            count,
+            step,
+            color: item.color || null,
+            icon: item.icon || null,
+            order: item.order ?? 0,
+            deletedAt,
+            updatedAt: incomingUpdatedAt,
           });
         }
+      }
+
+      if (counterCreates.length > 0) {
+        await this.prisma.counter.createMany({ data: counterCreates, skipDuplicates: true });
+      }
+      if (counterUpdates.length > 0) {
+        await this.prisma.$transaction(counterUpdates);
       }
     }
 

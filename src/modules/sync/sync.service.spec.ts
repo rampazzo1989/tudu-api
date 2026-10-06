@@ -16,27 +16,35 @@ describe('SyncService (Offline-First Cloud Sync)', () => {
     };
 
     mockPrisma = {
-      $transaction: jest.fn(async (cb: (tx: any) => Promise<any>) => cb(mockTx)),
+      $transaction: jest.fn(async (arg: any) => {
+        if (typeof arg === 'function') {
+          return arg(mockTx);
+        }
+        return Promise.all(arg);
+      }),
       list: {
         upsert: jest.fn(),
-        findMany: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
         findUnique: jest.fn(),
-        update: jest.fn(),
-        create: jest.fn(),
+        update: jest.fn().mockReturnValue(Promise.resolve({})),
+        create: jest.fn().mockReturnValue(Promise.resolve({})),
+        createMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       task: {
         upsert: jest.fn(),
-        findMany: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
         findUnique: jest.fn(),
-        update: jest.fn(),
-        create: jest.fn(),
+        update: jest.fn().mockReturnValue(Promise.resolve({})),
+        create: jest.fn().mockReturnValue(Promise.resolve({})),
+        createMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       counter: {
         upsert: jest.fn(),
-        findMany: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
         findUnique: jest.fn(),
-        update: jest.fn(),
-        create: jest.fn(),
+        update: jest.fn().mockReturnValue(Promise.resolve({})),
+        create: jest.fn().mockReturnValue(Promise.resolve({})),
+        createMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       userSettings: {
         upsert: jest.fn(),
@@ -111,20 +119,22 @@ describe('SyncService (Offline-First Cloud Sync)', () => {
       };
 
       const now = new Date();
-      mockPrisma.list.findUnique.mockResolvedValue(null);
-      mockPrisma.task.findUnique.mockResolvedValue(null);
-      mockPrisma.list.create.mockResolvedValue({});
-      mockPrisma.task.create.mockResolvedValue({});
-      mockPrisma.list.findMany.mockResolvedValue([
-        {
-          id: 'list-remote',
-          userId: 'user-1',
-          name: 'Lista Remota',
-          updatedAt: now,
-          deletedAt: null,
-        },
-      ]);
-      mockPrisma.task.findMany.mockResolvedValue([]);
+      mockPrisma.list.findMany.mockImplementation(async (query: any) => {
+        if (query?.where?.id?.in) return [];
+        return [
+          {
+            id: 'list-remote',
+            userId: 'user-1',
+            name: 'Lista Remota',
+            updatedAt: now,
+            deletedAt: null,
+          },
+        ];
+      });
+      mockPrisma.task.findMany.mockImplementation(async (query: any) => {
+        if (query?.where?.id?.in) return [];
+        return [];
+      });
       mockPrisma.counter.findMany.mockResolvedValue([]);
       mockPrisma.userSettings.findUnique.mockResolvedValue(null);
 
@@ -133,11 +143,11 @@ describe('SyncService (Offline-First Cloud Sync)', () => {
       expect(response.syncTimestamp).toBeDefined();
       expect(response.delta.lists.length).toBe(1);
       expect(response.delta.lists[0].id).toBe('list-remote');
-      expect(mockPrisma.list.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ id: 'list-10' }) }),
+      expect(mockPrisma.list.createMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.arrayContaining([expect.objectContaining({ id: 'list-10' })]) }),
       );
-      expect(mockPrisma.task.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ id: 'task-10' }) }),
+      expect(mockPrisma.task.createMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.arrayContaining([expect.objectContaining({ id: 'task-10' })]) }),
       );
     });
 
@@ -154,15 +164,20 @@ describe('SyncService (Offline-First Cloud Sync)', () => {
         ],
       };
 
-      mockPrisma.task.findUnique.mockResolvedValue({
-        id: 'task-10',
-        userId: 'user-1',
-        title: 'Título Antigo do Banco',
-        updatedAt: new Date(1700000050000), // DB is older than client (50000 < 60000)
+      mockPrisma.task.findMany.mockImplementation(async (query: any) => {
+        if (query?.where?.id?.in) {
+          return [
+            {
+              id: 'task-10',
+              userId: 'user-1',
+              title: 'Título Antigo do Banco',
+              updatedAt: new Date(1700000050000), // DB is older than client (50000 < 60000)
+            },
+          ];
+        }
+        return [];
       });
-      mockPrisma.task.update.mockResolvedValue({});
       mockPrisma.list.findMany.mockResolvedValue([]);
-      mockPrisma.task.findMany.mockResolvedValue([]);
       mockPrisma.counter.findMany.mockResolvedValue([]);
       mockPrisma.userSettings.findUnique.mockResolvedValue(null);
 
@@ -174,6 +189,7 @@ describe('SyncService (Offline-First Cloud Sync)', () => {
           data: expect.objectContaining({ title: 'Título Novo do Cliente' }),
         }),
       );
+      expect(mockPrisma.$transaction).toHaveBeenCalled();
     });
 
     it('should skip update and preserve DB record when existing DB timestamp is newer (Last-Write-Wins conflict protection)', async () => {
@@ -189,22 +205,17 @@ describe('SyncService (Offline-First Cloud Sync)', () => {
       };
 
       const dbUpdatedAt = new Date(1700000090000); // DB is NEWER (90000 > 40000)
-      mockPrisma.task.findUnique.mockResolvedValue({
-        id: 'task-conflict',
-        userId: 'user-1',
-        title: 'Edição Mais Recente Feita na Web',
-        updatedAt: dbUpdatedAt,
+      mockPrisma.task.findMany.mockImplementation(async (query: any) => {
+        return [
+          {
+            id: 'task-conflict',
+            userId: 'user-1',
+            title: 'Edição Mais Recente Feita na Web',
+            updatedAt: dbUpdatedAt,
+          },
+        ];
       });
-      mockPrisma.task.update.mockResolvedValue({});
       mockPrisma.list.findMany.mockResolvedValue([]);
-      mockPrisma.task.findMany.mockResolvedValue([
-        {
-          id: 'task-conflict',
-          userId: 'user-1',
-          title: 'Edição Mais Recente Feita na Web',
-          updatedAt: dbUpdatedAt,
-        },
-      ]);
       mockPrisma.counter.findMany.mockResolvedValue([]);
       mockPrisma.userSettings.findUnique.mockResolvedValue(null);
 
@@ -240,14 +251,19 @@ describe('SyncService (Offline-First Cloud Sync)', () => {
         ],
       };
 
-      mockPrisma.list.findUnique.mockResolvedValue({
-        id: 'list-deleted',
-        userId: 'user-1',
-        name: 'Lista Ativa',
-        updatedAt: new Date(deletedAt - 1000),
+      mockPrisma.list.findMany.mockImplementation(async (query: any) => {
+        if (query?.where?.id?.in) {
+          return [
+            {
+              id: 'list-deleted',
+              userId: 'user-1',
+              name: 'Lista Ativa',
+              updatedAt: new Date(deletedAt - 1000),
+            },
+          ];
+        }
+        return [];
       });
-      mockPrisma.list.update.mockResolvedValue({});
-      mockPrisma.list.findMany.mockResolvedValue([]);
       mockPrisma.task.findMany.mockResolvedValue([]);
       mockPrisma.counter.findMany.mockResolvedValue([]);
       mockPrisma.userSettings.findUnique.mockResolvedValue(null);
