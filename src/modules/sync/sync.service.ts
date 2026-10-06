@@ -631,6 +631,10 @@ export class SyncService {
       },
     ]);
 
+    const exportedEmojiUsage: [string, number][] = settings?.emojiUsage
+      ? Object.entries(settings.emojiUsage as Record<string, number>)
+      : [];
+
     return {
       metadata: {
         version: 1,
@@ -644,7 +648,17 @@ export class SyncService {
         archivedTudus: Array.from(archivedTudusMap.entries()),
         unlistedTudus,
         counters: exportedCounters,
-        settings,
+        emojiUsage: exportedEmojiUsage,
+        settings: settings
+          ? {
+              notificationSettings: settings.notificationSettings,
+              backupPreferences: settings.backupPreferences,
+              showOutdatedTudus: (settings.generalSettings as any)?.showOutdatedTudus,
+              hasSeenOnboarding: (settings.generalSettings as any)?.hasSeenOnboarding,
+              generalSettings: settings.generalSettings,
+              emojiUsage: settings.emojiUsage,
+            }
+          : undefined,
       },
     };
   }
