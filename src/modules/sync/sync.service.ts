@@ -543,7 +543,7 @@ export class SyncService {
         lists: remoteLists.map(l => ({
           ...l,
           label: l.name,
-          groupName: l.groupName || undefined,
+          groupName: l.groupName,
           sections: l.sections || undefined,
           orderingPrompt: l.orderingPrompt || undefined,
           updatedAt: l.updatedAt.getTime(),
@@ -607,7 +607,7 @@ export class SyncService {
           icon: l.icon,
           order: l.order,
           isArchived: l.isArchived,
-          groupName: l.groupName || undefined,
+          groupName: l.groupName,
           sections: l.sections || undefined,
           orderingPrompt: l.orderingPrompt || undefined,
         },
