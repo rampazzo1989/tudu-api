@@ -490,12 +490,14 @@ export class SyncService {
           notificationSettings: dto.settings.notificationSettings || undefined,
           backupPreferences: dto.settings.backupPreferences || undefined,
           generalSettings: dto.settings.generalSettings || undefined,
+          emojiUsage: dto.settings.emojiUsage || undefined,
         },
         create: {
           userId,
           notificationSettings: dto.settings.notificationSettings || null,
           backupPreferences: dto.settings.backupPreferences || null,
           generalSettings: dto.settings.generalSettings || null,
+          emojiUsage: dto.settings.emojiUsage || null,
         },
       });
     }
