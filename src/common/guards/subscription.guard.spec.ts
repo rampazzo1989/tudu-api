@@ -10,6 +10,8 @@ describe('SubscriptionGuard', () => {
     mockPrisma = {
       subscription: {
         findUnique: jest.fn(),
+        findFirst: jest.fn().mockResolvedValue(null),
+        update: jest.fn(),
       },
     };
     guard = new SubscriptionGuard(mockPrisma as PrismaService);
@@ -82,5 +84,24 @@ describe('SubscriptionGuard', () => {
     });
 
     await expect(guard.canActivate(context)).rejects.toThrow(ForbiddenException);
+  });
+
+  it('should link and allow access if subscription found by revenueCatAppUserId fallback', async () => {
+    const context = createMockContext({ id: 'user-1', email: 'test@tudu.app' });
+    const future = new Date(Date.now() + 20 * 24 * 60 * 60 * 1000);
+    mockPrisma.subscription.findUnique.mockResolvedValue(null);
+    mockPrisma.subscription.findFirst.mockResolvedValue({
+      id: 'sub-fallback-1',
+      status: 'ACTIVE',
+      currentPeriodEndsAt: future,
+      revenueCatAppUserId: 'test@tudu.app',
+    });
+
+    const result = await guard.canActivate(context);
+    expect(result).toBe(true);
+    expect(mockPrisma.subscription.update).toHaveBeenCalledWith({
+      where: { id: 'sub-fallback-1' },
+      data: { userId: 'user-1' },
+    });
   });
 });

@@ -95,6 +95,53 @@ describe('SyncService (Offline-First Cloud Sync)', () => {
       expect(mockTx.counter.upsert).toHaveBeenCalledTimes(1);
       expect(mockTx.userSettings.upsert).toHaveBeenCalled();
     });
+
+    it('should NEVER import sample list with id 1 or sample tasks into DB during snapshot import', async () => {
+      const snapshotDto = {
+        data: {
+          myLists: [
+            ['1', { name: 'Sample List' }],
+            ['valid-list', { name: 'Minha Lista' }],
+          ] as [string, any][],
+          tudus: [
+            [
+              '1',
+              [
+                ['10', { title: 'Sample Task 10' }],
+                ['11', { title: 'Sample Task 11' }],
+              ],
+            ],
+            [
+              'valid-list',
+              [
+                ['valid-task', { title: 'Comprar café' }],
+              ],
+            ],
+          ] as [string, [string, any][]][],
+        },
+      };
+
+      const result = await service.importSnapshot('user-1', snapshotDto);
+
+      expect(result.success).toBe(true);
+      expect(result.summary.importedLists).toBe(1);
+      expect(result.summary.importedTasks).toBe(1);
+      expect(mockTx.list.upsert).not.toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: '1' } }),
+      );
+      expect(mockTx.list.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'valid-list' } }),
+      );
+      expect(mockTx.task.upsert).not.toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: '10' } }),
+      );
+      expect(mockTx.task.upsert).not.toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: '11' } }),
+      );
+      expect(mockTx.task.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'valid-task' } }),
+      );
+    });
   });
 
   describe('syncDelta', () => {
@@ -148,6 +195,62 @@ describe('SyncService (Offline-First Cloud Sync)', () => {
       );
       expect(mockPrisma.task.createMany).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.arrayContaining([expect.objectContaining({ id: 'task-10' })]) }),
+      );
+    });
+
+    it('should NEVER create or update sample list 1 or sample tasks in syncDelta', async () => {
+      const deltaDto = {
+        lastSyncTimestamp: 1700000000000,
+        lists: [
+          {
+            id: '1',
+            name: 'Sample List',
+            updatedAt: 1700000050000,
+          },
+          {
+            id: 'custom-list',
+            name: 'Lista Real',
+            updatedAt: 1700000050000,
+          },
+        ],
+        tasks: [
+          {
+            id: '10',
+            listId: '1',
+            title: 'Sample Task 10',
+            done: true,
+            updatedAt: 1700000060000,
+          },
+          {
+            id: 'custom-task',
+            listId: 'custom-list',
+            title: 'Tarefa Real',
+            done: false,
+            updatedAt: 1700000060000,
+          },
+        ],
+      };
+
+      mockPrisma.list.findMany.mockResolvedValue([]);
+      mockPrisma.task.findMany.mockResolvedValue([]);
+      mockPrisma.counter.findMany.mockResolvedValue([]);
+      mockPrisma.userSettings.findUnique.mockResolvedValue(null);
+
+      await service.syncDelta('user-1', deltaDto);
+
+      expect(mockPrisma.list.createMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: [
+            expect.objectContaining({ id: 'custom-list' }),
+          ],
+        }),
+      );
+      expect(mockPrisma.task.createMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: [
+            expect.objectContaining({ id: 'custom-task' }),
+          ],
+        }),
       );
     });
 

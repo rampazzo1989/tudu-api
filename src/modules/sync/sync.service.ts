@@ -3,6 +3,9 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { SyncSnapshotDto } from './dto/sync-snapshot.dto';
 import { SyncDeltaDto } from './dto/sync-delta.dto';
 
+const SAMPLE_LIST_ID = '1';
+const SAMPLE_TASK_IDS = ['10', '11', '12'];
+
 @Injectable()
 export class SyncService {
   private readonly logger = new Logger(SyncService.name);
@@ -24,7 +27,7 @@ export class SyncService {
       // 1. Process Lists (myLists and archivedLists)
       const allLists = [...(data.myLists || []), ...(data.archivedLists || [])];
       for (const [id, listObj] of allLists) {
-        if (!id) continue;
+        if (!id || id === SAMPLE_LIST_ID) continue;
         const listName = listObj?.name || listObj?.label;
         if (!listName) continue;
         await tx.list.upsert({
@@ -60,9 +63,9 @@ export class SyncService {
       // data.tudus is [listId, [taskId, taskObj][]][]
       const nestedTaskGroups = [...(data.tudus || []), ...(data.archivedTudus || [])];
       for (const [listId, taskPairs] of nestedTaskGroups) {
-        if (!Array.isArray(taskPairs)) continue;
+        if (!Array.isArray(taskPairs) || listId === SAMPLE_LIST_ID) continue;
         for (const [id, task] of taskPairs) {
-          if (!id) continue;
+          if (!id || SAMPLE_TASK_IDS.includes(id)) continue;
           const taskTitle = task?.title || task?.label;
           if (!taskTitle) continue;
           const taskOrder = typeof task.scheduledOrder === 'number' ? task.scheduledOrder : (typeof task.order === 'number' ? task.order : 0);
@@ -107,7 +110,7 @@ export class SyncService {
       // Process unlisted tasks
       if (Array.isArray(data.unlistedTudus)) {
         for (const [id, task] of data.unlistedTudus) {
-          if (!id) continue;
+          if (!id || SAMPLE_TASK_IDS.includes(id)) continue;
           const taskTitle = task?.title || task?.label;
           if (!taskTitle) continue;
           const taskOrder = typeof task.scheduledOrder === 'number' ? task.scheduledOrder : (typeof task.order === 'number' ? task.order : 0);
@@ -256,6 +259,7 @@ export class SyncService {
       const listUpdates: any[] = [];
 
       for (const item of dto.lists) {
+        if (!item?.id || item.id === SAMPLE_LIST_ID) continue;
         const deletedAt = item.deletedAt ? this.parseTimestamp(item.deletedAt) : null;
         const listName = item.name || item.label || 'Lista';
         const incomingUpdatedAt = this.parseTimestamp(item.updatedAt);
@@ -330,6 +334,7 @@ export class SyncService {
       const taskUpdates: any[] = [];
 
       for (const item of dto.tasks) {
+        if (!item?.id || item.listId === SAMPLE_LIST_ID || SAMPLE_TASK_IDS.includes(item.id)) continue;
         const deletedAt = item.deletedAt ? this.parseTimestamp(item.deletedAt) : null;
         const taskTitle = item.title || item.label || 'Tarefa';
         const taskOrder =
@@ -506,6 +511,7 @@ export class SyncService {
     const remoteLists = await this.prisma.list.findMany({
       where: {
         userId,
+        id: { not: SAMPLE_LIST_ID },
         OR: [
           { updatedAt: { gt: lastSyncDate } },
           ...(conflictListIds.length > 0 ? [{ id: { in: conflictListIds } }] : []),
@@ -516,6 +522,15 @@ export class SyncService {
     const remoteTasks = await this.prisma.task.findMany({
       where: {
         userId,
+        id: { notIn: SAMPLE_TASK_IDS },
+        AND: [
+          {
+            OR: [
+              { listId: null },
+              { listId: { not: SAMPLE_LIST_ID } },
+            ],
+          },
+        ],
         OR: [
           { updatedAt: { gt: lastSyncDate } },
           ...(conflictTaskIds.length > 0 ? [{ id: { in: conflictTaskIds } }] : []),
@@ -578,11 +593,19 @@ export class SyncService {
    */
   async exportBackup(userId: string) {
     const lists = await this.prisma.list.findMany({
-      where: { userId, deletedAt: null },
+      where: { userId, deletedAt: null, id: { not: SAMPLE_LIST_ID } },
     });
 
     const tasks = await this.prisma.task.findMany({
-      where: { userId, deletedAt: null },
+      where: {
+        userId,
+        deletedAt: null,
+        id: { notIn: SAMPLE_TASK_IDS },
+        OR: [
+          { listId: null },
+          { listId: { not: SAMPLE_LIST_ID } },
+        ],
+      },
     });
 
     const counters = await this.prisma.counter.findMany({

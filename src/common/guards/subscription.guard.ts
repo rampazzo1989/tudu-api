@@ -19,9 +19,27 @@ export class SubscriptionGuard implements CanActivate {
       throw new UnauthorizedException('Authentication required');
     }
 
-    const subscription = await this.prisma.subscription.findUnique({
+    let subscription = await this.prisma.subscription.findUnique({
       where: { userId: user.id },
     });
+
+    if (!subscription && (user.email || user.id)) {
+      subscription = await this.prisma.subscription.findFirst({
+        where: {
+          OR: [
+            { revenueCatAppUserId: user.id },
+            ...(user.email ? [{ revenueCatAppUserId: user.email }] : []),
+          ],
+        },
+      });
+
+      if (subscription) {
+        await this.prisma.subscription.update({
+          where: { id: subscription.id },
+          data: { userId: user.id },
+        });
+      }
+    }
 
     if (!subscription) {
       throw new ForbiddenException({

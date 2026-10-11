@@ -12,10 +12,25 @@ export class SubscriptionsService {
   async handleRevenueCatEvent(event: RevenueCatEventDto) {
     this.logger.log(`Processing RevenueCat event: ${event.type} for app_user_id: ${event.app_user_id}`);
 
-    // Try finding user by id or email
+    // Try finding user by id, email, original_app_user_id, or aliases
+    const searchConditions: any[] = [
+      { id: event.app_user_id },
+      { email: event.app_user_id },
+    ];
+    if (event.original_app_user_id) {
+      searchConditions.push({ id: event.original_app_user_id });
+      searchConditions.push({ email: event.original_app_user_id });
+    }
+    if (Array.isArray(event.aliases) && event.aliases.length > 0) {
+      event.aliases.forEach(alias => {
+        searchConditions.push({ id: alias });
+        searchConditions.push({ email: alias });
+      });
+    }
+
     const user = await this.prisma.user.findFirst({
       where: {
-        OR: [{ id: event.app_user_id }, { email: event.app_user_id }],
+        OR: searchConditions,
       },
     });
 
@@ -126,14 +141,27 @@ export class SubscriptionsService {
 
   async syncClientSubscription(
     userId: string,
-    dto: { isPro: boolean; status?: string; planId?: string },
+    dto: {
+      isPro: boolean;
+      status?: string;
+      planId?: string;
+      trialEndsAt?: string | null;
+      currentPeriodEndsAt?: string | null;
+      revenueCatAppUserId?: string | null;
+    },
   ) {
     if (!dto.isPro) {
       return this.getSubscriptionStatus(userId);
     }
 
     const now = new Date();
-    const periodEndsAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const periodEndsAt = dto.currentPeriodEndsAt
+      ? new Date(dto.currentPeriodEndsAt)
+      : new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const trialEndsAt = dto.trialEndsAt
+      ? new Date(dto.trialEndsAt)
+      : (dto.status === 'TRIALING' ? periodEndsAt : null);
+
     const newStatus =
       dto.status === 'TRIALING'
         ? SubscriptionStatus.TRIALING
@@ -144,7 +172,9 @@ export class SubscriptionsService {
       update: {
         status: newStatus,
         planId: dto.planId || 'tudu_pro_monthly',
+        trialEndsAt: newStatus === SubscriptionStatus.TRIALING ? trialEndsAt : null,
         currentPeriodEndsAt: periodEndsAt,
+        revenueCatAppUserId: dto.revenueCatAppUserId || undefined,
       },
       create: {
         userId,
@@ -153,10 +183,11 @@ export class SubscriptionsService {
         priceCents: 490,
         currency: 'BRL',
         trialStartsAt: newStatus === SubscriptionStatus.TRIALING ? now : null,
-        trialEndsAt: newStatus === SubscriptionStatus.TRIALING ? periodEndsAt : null,
+        trialEndsAt: newStatus === SubscriptionStatus.TRIALING ? trialEndsAt : null,
         currentPeriodStartsAt: now,
         currentPeriodEndsAt: periodEndsAt,
         originalPurchaseDate: now,
+        revenueCatAppUserId: dto.revenueCatAppUserId || null,
       },
     });
 

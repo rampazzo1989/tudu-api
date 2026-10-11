@@ -29,6 +29,13 @@ export class RevenueCatEventDto {
 
   @IsOptional()
   price_in_purchased_currency?: number;
+
+  @IsOptional()
+  aliases?: string[];
+
+  @IsString()
+  @IsOptional()
+  original_app_user_id?: string;
 }
 
 export class RevenueCatWebhookDto {
