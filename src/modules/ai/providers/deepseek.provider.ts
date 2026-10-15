@@ -5,6 +5,8 @@ import {
   IAiProvider,
   ParsedListResult,
   ParseListParams,
+  ParseVoiceTuduParams,
+  ParsedVoiceTuduResult,
   ReorderListParams,
   TaskSuggestionParams,
 } from '../interfaces/ai-types';
@@ -208,6 +210,102 @@ export class DeepSeekProvider implements IAiProvider {
       return {
         title: params.listName || 'Lista Tudú',
         items: params.items,
+      };
+    }
+  }
+
+  async parseVoiceTudu(params: ParseVoiceTuduParams, signal?: AbortSignal): Promise<ParsedVoiceTuduResult> {
+    const listsContext =
+      params.lists && params.lists.length > 0
+        ? `\nListas existentes do usuário (ID | Nome):\n` +
+          params.lists.map(l => `- "${l.id}" | "${l.name}"`).join('\n')
+        : '\nO usuário não possui listas customizadas.';
+
+    const systemPrompt =
+      'You are an intelligent voice assistant in a todo app (Tudú). Your job is to analyze natural language speech transcripts from the user and parse them into a structured task.\n' +
+      'Rules:\n' +
+      '1. Is it a task?\n' +
+      '   - If the speech transcript is empty, pure conversational filler, greeting, noise, or not an actionable task/todo item (e.g. "oi tudo bem", "que horas são", "bom dia"), return:\n' +
+      '     {"isTask": false, "reason": "not_a_task"}\n' +
+      '2. Task Title / Label:\n' +
+      '   - Extract the actionable task description.\n' +
+      '   - It MUST start with an appropriate emoji (e.g. "🦷 Marcar dentista", "🥖 Comprar pão", "💊 Tomar remédio").\n' +
+      '   - Strip out date, time, list, and recurrence keywords from the label so the title remains clean (e.g. "comprar pão amanhã às 8 da manhã na lista mercado" -> label: "🥖 Comprar pão").\n' +
+      '   - Capitalize the first letter properly.\n' +
+      '3. List Assignment:\n' +
+      '   - If the user explicitly mentions adding to a specific list (e.g., "na lista mercado", "em trabalho", "adiciona em filmes"), match it semantically to the closest list from the provided list of user lists and set "listId" to that list\'s exact ID.\n' +
+      '   - If no matching list is found or the user did not specify any list, set "listId": null.\n' +
+      '4. Due Date & Time:\n' +
+      '   - Resolve relative dates based on the current timestamp (e.g. "hoje", "amanhã", "depois de amanhã", "segunda-feira", "dia 25"). Format "date" strictly as "YYYY-MM-DD". If no date is mentioned, set "date": null.\n' +
+      '   - Resolve specific times (e.g. "às 8", "às 14h30", "às 9 da noite" -> "21:00"). Format "time" strictly as 24-hour "HH:mm". If no time is mentioned, set "time": null.\n' +
+      '5. Recurrence:\n' +
+      '   - Detect recurring patterns: "daily" ("todo dia", "diariamente"), "weekly" ("toda semana", "toda terça", "semanalmente"), "monthly" ("todo mês", "mensalmente"), "yearly" ("todo ano", "anualmente"). Otherwise set "recurrence": null.\n' +
+      '6. Starred / Important:\n' +
+      '   - If the user indicates urgency or importance ("importante", "urgente", "com estrela", "prioridade"), set "starred": true, otherwise false.\n' +
+      '7. Return strictly valid JSON matching this schema:\n' +
+      '{\n' +
+      '  "isTask": boolean,\n' +
+      '  "reason": "not_a_task" | "unintelligible" | null,\n' +
+      '  "label": string,\n' +
+      '  "listId": string | null,\n' +
+      '  "date": "YYYY-MM-DD" | null,\n' +
+      '  "time": "HH:mm" | null,\n' +
+      '  "recurrence": "daily" | "weekly" | "monthly" | "yearly" | null,\n' +
+      '  "starred": boolean\n' +
+      '}\n' +
+      'Do not include markdown codeblocks or text outside the JSON object.';
+
+    const userPrompt =
+      `Data/Hora Atual de Referência: ${params.now}\n` +
+      `Fuso Horário: ${params.timezone || 'UTC'}\n` +
+      `Idioma: ${params.locale || 'pt-BR'}\n` +
+      `${listsContext}\n\n` +
+      `Transcrição de voz do usuário:\n"""\n${params.transcript}\n"""`;
+
+    const raw = await this.callChatApi(
+      this.modelFast,
+      systemPrompt,
+      userPrompt,
+      300,
+      0.1,
+      signal,
+    );
+
+    try {
+      const cleaned = raw.replace(/```json/gi, '').replace(/```/g, '').trim();
+      const parsed = JSON.parse(cleaned);
+      if (parsed.isTask === false) {
+        return {
+          isTask: false,
+          reason: parsed.reason || 'not_a_task',
+          label: '',
+          listId: null,
+          date: null,
+          time: null,
+          recurrence: null,
+          starred: false,
+        };
+      }
+
+      return {
+        isTask: true,
+        label: typeof parsed.label === 'string' ? parsed.label : params.transcript,
+        listId: typeof parsed.listId === 'string' ? parsed.listId : null,
+        date: typeof parsed.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsed.date) ? parsed.date : null,
+        time: typeof parsed.time === 'string' && /^\d{2}:\d{2}$/.test(parsed.time) ? parsed.time : null,
+        recurrence: ['daily', 'weekly', 'monthly', 'yearly'].includes(parsed.recurrence) ? parsed.recurrence : null,
+        starred: Boolean(parsed.starred),
+      };
+    } catch (e) {
+      this.logger.error(`Failed to parse voice tudu result: ${e.message}`);
+      return {
+        isTask: true,
+        label: params.transcript,
+        listId: null,
+        date: null,
+        time: null,
+        recurrence: null,
+        starred: false,
       };
     }
   }

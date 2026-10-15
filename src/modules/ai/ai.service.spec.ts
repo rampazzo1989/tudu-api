@@ -16,6 +16,7 @@ describe('AiService (Orchestration & Fallback)', () => {
       suggestEmojis: jest.fn(),
       suggestTasks: jest.fn(),
       parseList: jest.fn(),
+      parseVoiceTudu: jest.fn(),
     };
 
     mockOpenAi = {
@@ -23,6 +24,7 @@ describe('AiService (Orchestration & Fallback)', () => {
       suggestEmojis: jest.fn(),
       suggestTasks: jest.fn(),
       parseList: jest.fn(),
+      parseVoiceTudu: jest.fn(),
     };
 
     mockConfig = {
@@ -31,6 +33,7 @@ describe('AiService (Orchestration & Fallback)', () => {
         if (key === 'AI_DEFAULT_PROVIDER') return 'deepseek';
         if (key === 'AI_MAX_EMOJI_PER_DAY') return 5;
         if (key === 'AI_MAX_PARSE_PER_DAY') return 3;
+        if (key === 'AI_MAX_VOICE_PER_DAY') return 2;
         return defaultValue;
       }),
     };
@@ -137,6 +140,95 @@ describe('AiService (Orchestration & Fallback)', () => {
     });
   });
 
+  describe('parseVoiceTudu', () => {
+    it('should parse voice transcript into structured task successfully', async () => {
+      mockDeepSeek.parseVoiceTudu.mockResolvedValue({
+        isTask: true,
+        label: '🦷 Marcar dentista',
+        listId: 'list-1',
+        date: '2026-10-15',
+        time: '14:30',
+        recurrence: null,
+        starred: false,
+      });
+
+      const response = await service.parseVoiceTudu('user-voice-1', {
+        transcript: 'marcar dentista amanhã às 14h30 na lista saúde',
+        now: '2026-10-14T23:00:00-03:00',
+        lists: [{ id: 'list-1', name: 'Saúde' }],
+      });
+
+      expect(response.result.isTask).toBe(true);
+      expect(response.result.label).toBe('🦷 Marcar dentista');
+      expect(response.result.listId).toBe('list-1');
+      expect(response.result.date).toBe('2026-10-15');
+      expect(response.result.time).toBe('14:30');
+      expect(response.providerUsed).toBe('deepseek');
+    });
+
+    it('should normalize invalid listId to null if not present in user lists', async () => {
+      mockDeepSeek.parseVoiceTudu.mockResolvedValue({
+        isTask: true,
+        label: '🥖 Comprar pão',
+        listId: 'non-existent-list',
+        date: null,
+        time: null,
+        recurrence: null,
+        starred: false,
+      });
+
+      const response = await service.parseVoiceTudu('user-voice-2', {
+        transcript: 'comprar pão',
+        now: '2026-10-14T23:00:00-03:00',
+        lists: [{ id: 'list-mercado', name: 'Mercado' }],
+      });
+
+      expect(response.result.listId).toBeNull();
+    });
+
+    it('should handle non-task transcripts correctly', async () => {
+      mockDeepSeek.parseVoiceTudu.mockResolvedValue({
+        isTask: false,
+        reason: 'not_a_task',
+        label: '',
+        listId: null,
+        date: null,
+        time: null,
+        recurrence: null,
+        starred: false,
+      });
+
+      const response = await service.parseVoiceTudu('user-voice-3', {
+        transcript: 'oi tudo bem como você está',
+        now: '2026-10-14T23:00:00-03:00',
+      });
+
+      expect(response.result.isTask).toBe(false);
+      expect(response.result.reason).toBe('not_a_task');
+    });
+
+    it('should enforce daily voice quota', async () => {
+      mockDeepSeek.parseVoiceTudu.mockResolvedValue({
+        isTask: true,
+        label: 'Task',
+        listId: null,
+        date: null,
+        time: null,
+        recurrence: null,
+        starred: false,
+      });
+      const userId = 'user-voice-quota';
+
+      // Limit is 2 in mock
+      await service.parseVoiceTudu(userId, { transcript: 'task 1', now: '2026-10-14T23:00:00Z' });
+      await service.parseVoiceTudu(userId, { transcript: 'task 2', now: '2026-10-14T23:00:00Z' });
+
+      await expect(
+        service.parseVoiceTudu(userId, { transcript: 'task 3', now: '2026-10-14T23:00:00Z' }),
+      ).rejects.toThrow(HttpException);
+    });
+  });
+
   describe('getQuotaStatus', () => {
     it('should return correct quota tracking metrics', async () => {
       mockDeepSeek.suggestEmojis.mockResolvedValue(['🔥']);
@@ -149,6 +241,9 @@ describe('AiService (Orchestration & Fallback)', () => {
       expect(status.dailyEmojiLimit).toBe(5);
       expect(status.emojisUsedToday).toBe(2);
       expect(status.emojisRemainingToday).toBe(3);
+      expect(status.dailyVoiceLimit).toBe(2);
+      expect(status.voiceUsedToday).toBe(0);
+      expect(status.voiceRemainingToday).toBe(2);
     });
   });
 });

@@ -12,6 +12,7 @@ import { SuggestEmojisDto } from './dto/suggest-emojis.dto';
 import { SuggestTasksDto } from './dto/suggest-tasks.dto';
 import { ParseListDto } from './dto/parse-list.dto';
 import { ReorderListDto } from './dto/reorder-list.dto';
+import { ParseVoiceTuduDto } from './dto/parse-voice-tudu.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { SubscriptionGuard } from '../../common/guards/subscription.guard';
 import { CurrentUser, CurrentUserData } from '../../common/decorators/current-user.decorator';
@@ -59,6 +60,15 @@ export class AiController {
     @Body() dto: ReorderListDto,
   ) {
     return this.aiService.reorderList(user.id, dto);
+  }
+
+  @Post('parse-voice-tudu')
+  @HttpCode(HttpStatus.OK)
+  async parseVoiceTudu(
+    @CurrentUser() user: CurrentUserData,
+    @Body() dto: ParseVoiceTuduDto,
+  ) {
+    return this.aiService.parseVoiceTudu(user.id, dto);
   }
 
   @Get('quota')

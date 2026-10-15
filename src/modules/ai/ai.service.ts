@@ -13,16 +13,20 @@ import {
   IAiProvider,
   ParsedListResult,
   ParseListParams,
+  ParseVoiceTuduParams,
+  ParsedVoiceTuduResult,
   ReorderListParams,
   TaskSuggestionParams,
 } from './interfaces/ai-types';
 import { sanitizeInputText } from '../../common/sanitizers/prompt-sanitizer';
+import { ParseVoiceTuduDto } from './dto/parse-voice-tudu.dto';
 
 interface UserDailyUsage {
   date: string;
   emojisCount: number;
   tasksCount: number;
   parsesCount: number;
+  voiceCount: number;
 }
 
 @Injectable()
@@ -32,6 +36,7 @@ export class AiService {
   private readonly defaultProvider: string;
   private readonly maxEmojisPerDay: number;
   private readonly maxParsesPerDay: number;
+  private readonly maxVoicePerDay: number;
 
   // In-memory daily quota tracker (userId -> UserDailyUsage)
   private readonly usageMap = new Map<string, UserDailyUsage>();
@@ -45,6 +50,7 @@ export class AiService {
     this.defaultProvider = this.configService.get<string>('AI_DEFAULT_PROVIDER', 'deepseek');
     this.maxEmojisPerDay = Number(this.configService.get('AI_MAX_EMOJI_PER_DAY', 200));
     this.maxParsesPerDay = Number(this.configService.get('AI_MAX_PARSE_PER_DAY', 50));
+    this.maxVoicePerDay = Number(this.configService.get('AI_MAX_VOICE_PER_DAY', 100));
   }
 
   async suggestEmojis(userId: string, params: EmojiSuggestionParams): Promise<{ emojis: string[]; providerUsed: string }> {
@@ -139,12 +145,83 @@ export class AiService {
     }));
   }
 
+  async parseVoiceTudu(userId: string, dto: ParseVoiceTuduDto): Promise<{ result: ParsedVoiceTuduResult; providerUsed: string }> {
+    this.checkAndIncrementQuota(userId, 'voice');
+
+    const cleanTranscript = sanitizeInputText(dto.transcript, 'transcript', 500);
+    const cleanNow = sanitizeInputText(dto.now, 'now', 50);
+    const cleanTimezone = dto.timezone ? sanitizeInputText(dto.timezone, 'timezone', 50) : undefined;
+    const cleanLocale = dto.locale ? sanitizeInputText(dto.locale, 'locale', 20) : undefined;
+
+    const cleanLists = dto.lists
+      ? dto.lists.slice(0, 50).map(l => ({
+          id: sanitizeInputText(l.id, 'list.id', 64),
+          name: sanitizeInputText(l.name, 'list.name', 100),
+        }))
+      : undefined;
+
+    const sanitizedParams: ParseVoiceTuduParams = {
+      transcript: cleanTranscript,
+      now: cleanNow,
+      timezone: cleanTimezone,
+      locale: cleanLocale,
+      lists: cleanLists,
+    };
+
+    const res = await this.executeWithStrategy(
+      async (provider, signal) => provider.parseVoiceTudu(sanitizedParams, signal),
+      'parseVoiceTudu',
+    );
+
+    const result = res.data;
+
+    // Server-side normalization & safety guarantees
+    if (result.isTask) {
+      // Validate listId exists in user lists
+      if (result.listId && cleanLists) {
+        const found = cleanLists.some(l => l.id === result.listId);
+        if (!found) {
+          result.listId = null;
+        }
+      } else if (!cleanLists || cleanLists.length === 0) {
+        result.listId = null;
+      }
+
+      // Validate date format YYYY-MM-DD
+      if (result.date && !/^\d{4}-\d{2}-\d{2}$/.test(result.date)) {
+        result.date = null;
+      }
+
+      // Validate time format HH:mm
+      if (result.time && !/^\d{2}:\d{2}$/.test(result.time)) {
+        result.time = null;
+      }
+
+      // Validate recurrence enum
+      if (result.recurrence && !['daily', 'weekly', 'monthly', 'yearly'].includes(result.recurrence)) {
+        result.recurrence = null;
+      }
+
+      // Safety check: label cannot be empty
+      if (!result.label || !result.label.trim()) {
+        result.isTask = false;
+        result.reason = 'not_a_task';
+      }
+    }
+
+    return {
+      result,
+      providerUsed: res.providerUsed,
+    };
+  }
+
   getQuotaStatus(userId: string) {
     const today = this.getTodayDateString();
     const usage = this.usageMap.get(userId);
 
     const emojisUsed = usage?.date === today ? usage.emojisCount : 0;
     const parsesUsed = usage?.date === today ? usage.parsesCount : 0;
+    const voiceUsed = usage?.date === today ? usage.voiceCount : 0;
 
     return {
       dailyEmojiLimit: this.maxEmojisPerDay,
@@ -153,15 +230,18 @@ export class AiService {
       dailyParseLimit: this.maxParsesPerDay,
       parsesUsedToday: parsesUsed,
       parsesRemainingToday: Math.max(0, this.maxParsesPerDay - parsesUsed),
+      dailyVoiceLimit: this.maxVoicePerDay,
+      voiceUsedToday: voiceUsed,
+      voiceRemainingToday: Math.max(0, this.maxVoicePerDay - voiceUsed),
     };
   }
 
-  private checkAndIncrementQuota(userId: string, type: 'emojis' | 'tasks' | 'parses') {
+  private checkAndIncrementQuota(userId: string, type: 'emojis' | 'tasks' | 'parses' | 'voice') {
     const today = this.getTodayDateString();
     let usage = this.usageMap.get(userId);
 
     if (!usage || usage.date !== today) {
-      usage = { date: today, emojisCount: 0, tasksCount: 0, parsesCount: 0 };
+      usage = { date: today, emojisCount: 0, tasksCount: 0, parsesCount: 0, voiceCount: 0 };
       this.usageMap.set(userId, usage);
     }
 
@@ -190,6 +270,18 @@ export class AiService {
         );
       }
       usage.parsesCount++;
+    } else if (type === 'voice') {
+      if (usage.voiceCount >= this.maxVoicePerDay) {
+        throw new HttpException(
+          {
+            statusCode: HttpStatus.TOO_MANY_REQUESTS,
+            message: `Limite diário de criação por voz com IA (${this.maxVoicePerDay}/dia) atingido. O limite será renovado à meia-noite.`,
+            code: 'DAILY_QUOTA_EXCEEDED',
+          },
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+      usage.voiceCount++;
     }
   }
 
