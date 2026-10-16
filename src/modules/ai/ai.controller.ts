@@ -1,12 +1,16 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
   HttpCode,
   HttpStatus,
   Post,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { AiService } from './ai.service';
 import { SuggestEmojisDto } from './dto/suggest-emojis.dto';
 import { SuggestTasksDto } from './dto/suggest-tasks.dto';
@@ -69,6 +73,46 @@ export class AiController {
     @Body() dto: ParseVoiceTuduDto,
   ) {
     return this.aiService.parseVoiceTudu(user.id, dto);
+  }
+
+  @Post('parse-voice-audio')
+  @UseInterceptors(FileInterceptor('audio'))
+  @HttpCode(HttpStatus.OK)
+  async parseVoiceAudio(
+    @CurrentUser() user: CurrentUserData,
+    @UploadedFile() file: any,
+    @Body() body: any,
+  ) {
+    let audioBuffer: Buffer;
+    let mimeType = 'audio/webm';
+
+    if (file && file.buffer) {
+      audioBuffer = file.buffer;
+      mimeType = file.mimetype || 'audio/webm';
+    } else if (body.audioBase64) {
+      audioBuffer = Buffer.from(body.audioBase64, 'base64');
+      if (body.mimeType) mimeType = body.mimeType;
+    } else {
+      throw new BadRequestException('Audio file or audioBase64 is required');
+    }
+
+    let lists = body.lists;
+    if (typeof lists === 'string') {
+      try {
+        lists = JSON.parse(lists);
+      } catch {
+        lists = undefined;
+      }
+    }
+
+    return this.aiService.parseVoiceAudio(user.id, {
+      audioBuffer,
+      mimeType,
+      now: body.now || new Date().toISOString(),
+      timezone: body.timezone,
+      locale: body.locale,
+      lists,
+    });
   }
 
   @Get('quota')

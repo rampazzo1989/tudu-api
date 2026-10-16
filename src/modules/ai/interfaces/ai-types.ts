@@ -70,4 +70,14 @@ export interface IAiProvider {
   parseList(params: ParseListParams, signal?: AbortSignal): Promise<ParsedListResult>;
   reorderList(params: ReorderListParams, signal?: AbortSignal): Promise<ParsedListResult>;
   parseVoiceTudu(params: ParseVoiceTuduParams, signal?: AbortSignal): Promise<ParsedVoiceTuduResult>;
+  transcribeAudio?(audioBuffer: Buffer, mimeType: string, locale?: string, signal?: AbortSignal): Promise<string>;
+}
+
+export interface ParseVoiceAudioParams {
+  audioBuffer: Buffer;
+  mimeType: string;
+  now: string;
+  timezone?: string;
+  locale?: string;
+  lists?: Array<{ id: string; name: string }>;
 }

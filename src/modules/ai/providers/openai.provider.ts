@@ -332,6 +332,55 @@ export class OpenAiProvider implements IAiProvider {
     }
   }
 
+  async transcribeAudio(
+    audioBuffer: Buffer,
+    mimeType: string,
+    locale?: string,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    if (!this.apiKey) {
+      throw new Error('OpenAI API Key is not configured in Tudú API.');
+    }
+
+    const cleanLocale = (locale || 'pt-BR').toLowerCase().replace('_', '-');
+    let langCode = 'pt';
+    if (cleanLocale.startsWith('en')) langCode = 'en';
+    else if (cleanLocale.startsWith('es')) langCode = 'es';
+    else if (cleanLocale.startsWith('it')) langCode = 'it';
+
+    let ext = 'webm';
+    if (mimeType.includes('mp4') || mimeType.includes('m4a')) ext = 'm4a';
+    else if (mimeType.includes('wav')) ext = 'wav';
+    else if (mimeType.includes('ogg')) ext = 'ogg';
+    else if (mimeType.includes('mp3') || mimeType.includes('mpeg')) ext = 'mp3';
+
+    const blob = new Blob([new Uint8Array(audioBuffer)], { type: mimeType });
+    const formData = new FormData();
+    formData.append('file', blob, `voice_recording.${ext}`);
+    formData.append('model', 'whisper-1');
+    formData.append('language', langCode);
+    formData.append('temperature', '0');
+
+    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.apiKey}`,
+      },
+      body: formData,
+      signal,
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      const msg = err?.error?.message || `Whisper transcription error (${response.status})`;
+      this.logger.error(`Failed to transcribe audio with Whisper: ${msg}`);
+      throw new Error(msg);
+    }
+
+    const data = await response.json();
+    return (data?.text || '').trim();
+  }
+
   private async callChatApi(
     model: string,
     systemPrompt: string,

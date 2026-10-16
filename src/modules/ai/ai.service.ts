@@ -215,6 +215,55 @@ export class AiService {
     };
   }
 
+  async parseVoiceAudio(
+    userId: string,
+    params: {
+      audioBuffer: Buffer;
+      mimeType: string;
+      now: string;
+      timezone?: string;
+      locale?: string;
+      lists?: Array<{ id: string; name: string }>;
+    },
+  ): Promise<{ transcript: string; result: ParsedVoiceTuduResult; providerUsed: string }> {
+    const transcript = await this.openAiProvider.transcribeAudio(
+      params.audioBuffer,
+      params.mimeType,
+      params.locale,
+    );
+
+    if (!transcript || !transcript.trim()) {
+      return {
+        transcript: '',
+        result: {
+          isTask: false,
+          reason: 'unintelligible',
+          label: '',
+          listId: null,
+          date: null,
+          time: null,
+          recurrence: null,
+          starred: false,
+        },
+        providerUsed: 'openai',
+      };
+    }
+
+    const parsed = await this.parseVoiceTudu(userId, {
+      transcript,
+      now: params.now,
+      timezone: params.timezone,
+      locale: params.locale,
+      lists: params.lists,
+    });
+
+    return {
+      transcript,
+      result: parsed.result,
+      providerUsed: parsed.providerUsed,
+    };
+  }
+
   getQuotaStatus(userId: string) {
     const today = this.getTodayDateString();
     const usage = this.usageMap.get(userId);
