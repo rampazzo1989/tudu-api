@@ -217,21 +217,21 @@ export class DeepSeekProvider implements IAiProvider {
   async parseVoiceTudu(params: ParseVoiceTuduParams, signal?: AbortSignal): Promise<ParsedVoiceTuduResult> {
     const cleanLocale = (params.locale || 'pt-BR').toLowerCase().replace('_', '-');
     let targetLanguage = 'Portuguese';
-    let targetExample = '"🥖 Comprar pão", "🦷 Marcar dentista", "💊 Tomar remédio"';
-    let fillerExamples = '"oi tudo bem", "que horas são", "bom dia"';
+    let targetExample = '"🥖 Comprar pão", "🏛️ Roma", "🥛 Leite integral", "🦷 Marcar dentista", "🎬 Interestelar", "🧳 Passaporte"';
+    let fillerExamples = '"oi tudo bem", "que horas são", "bom dia", "como vai você"';
 
     if (cleanLocale.startsWith('en')) {
       targetLanguage = 'English';
-      targetExample = '"🥖 Buy bread", "🦷 Dentist appointment", "💊 Take vitamins"';
-      fillerExamples = '"hello how are you", "what time is it", "good morning"';
+      targetExample = '"🥖 Buy bread", "🏛️ Rome", "🥛 Whole milk", "🦷 Dentist appointment", "🎬 Interstellar", "🧳 Passport"';
+      fillerExamples = '"hello how are you", "what time is it", "good morning", "how are you doing"';
     } else if (cleanLocale.startsWith('es')) {
       targetLanguage = 'Spanish';
-      targetExample = '"🥖 Comprar pan", "🦷 Cita con el dentista", "💊 Tomar vitaminas"';
-      fillerExamples = '"hola cómo estás", "qué hora es", "buenos días"';
+      targetExample = '"🥖 Comprar pan", "🏛️ Roma", "🥛 Leche entera", "🦷 Cita con el dentista", "🎬 Interestelar", "🧳 Pasaporte"';
+      fillerExamples = '"hola cómo estás", "qué hora es", "buenos días", "cómo te va"';
     } else if (cleanLocale.startsWith('it')) {
       targetLanguage = 'Italian';
-      targetExample = '"🥖 Comprare il pane", "🦷 Dentista", "💊 Prendere le vitamine"';
-      fillerExamples = '"ciao come stai", "che ore sono", "buongiorno"';
+      targetExample = '"🥖 Comprare il pane", "🏛️ Roma", "🥛 Latte intero", "🦷 Dentista", "🎬 Interstellar", "🧳 Passaporto"';
+      fillerExamples = '"ciao come stai", "che ore sono", "buongiorno", "come va"';
     }
 
     const listsContext =
@@ -241,28 +241,38 @@ export class DeepSeekProvider implements IAiProvider {
         : '\nUser has no custom lists.';
 
     const systemPrompt =
-      `You are an intelligent voice assistant in a todo app (Tudú). Your job is to analyze natural language speech transcripts from the user and parse them into a structured task.\n` +
+      `You are an intelligent voice assistant in a todo and checklist app (Tudú). Your job is to analyze natural language speech transcripts from the user and parse them into a structured task or checklist item.\n` +
       `CRITICAL LANGUAGE REQUIREMENT: The user's app is in ${targetLanguage}. The output task "label" MUST be written strictly in ${targetLanguage} (e.g. ${targetExample}). NEVER return the label in Portuguese or any other language unless ${targetLanguage} is Portuguese.\n\n` +
       `Rules:\n` +
-      `1. Is it a task?\n` +
-      `   - If the speech transcript is empty, pure conversational filler, greeting, noise, or not an actionable task/todo item (e.g. ${fillerExamples}), return:\n` +
-      `     {"isTask": false, "reason": "not_a_task"}\n` +
+      `1. What is a task / tudú item? (BROAD CHECKLIST RECOGNITION):\n` +
+      `   - In Tudú, a task is ANY item that belongs to a to-do list, checklist, packing list, grocery list, or idea list. It DOES NOT need to contain an action verb.\n` +
+      `   - VALID TASKS INCLUDE:\n` +
+      `     a) Nouns, places, travel destinations, or cities (e.g., "Roma", "Paris", "Tóquio") for travel/places lists.\n` +
+      `     b) Groceries, supermarket items, ingredients, products (e.g., "Leite", "Café", "Pão", "Detergente").\n` +
+      `     c) Media, books, movies, games, or topics (e.g., "Matrix", "Interestelar", "Clean Code").\n` +
+      `     d) Packing, gear, or personal items (e.g., "Passaporte", "Protetor solar", "Carregador").\n` +
+      `     e) Single words, short phrases, nouns, checklist checkables, or notes.\n` +
+      `     f) Traditional action items and chores with verbs (e.g., "Limpar o chão", "Marcar dentista", "Pagar boleto").\n` +
+      `   - ONLY return {"isTask": false, "reason": "not_a_task"} if the speech is truly empty, conversational filler/pleasantries (e.g. ${fillerExamples}), casual chatter, assistant queries (e.g. "que horas são", "quem é você"), microphone noise, or incomprehensible babble.\n` +
+      `   - If the user dictates a single noun or entity (e.g., "Roma", "Banana", "Chuveiro"), IT IS A VALID TASK (isTask: true).\n\n` +
       `2. Task Title / Label:\n` +
-      `   - Extract the actionable task description.\n` +
-      `   - It MUST start with an appropriate emoji.\n` +
+      `   - Extract the clean item or task description.\n` +
+      `   - Strip out conversational command preambles such as "adicionar", "colocar", "anotar", "põe", "inserir", "lembrar de", "add", "put", "record", "new task" if they are merely meta-instructions to create the item.\n` +
+      `   - Strip out date, time, list name, and recurrence keywords from the label so the title remains clean.\n` +
+      `   - It MUST start with an appropriate emoji corresponding to the item or action (e.g., "🏛️ Roma", "🥖 Pão", "🎬 Inception", "🧹 Limpar o chão", "🥛 Leite").\n` +
       `   - It MUST be expressed in ${targetLanguage}.\n` +
-      `   - Strip out date, time, list, and recurrence keywords from the label so the title remains clean.\n` +
-      `   - Capitalize the first letter properly.\n` +
+      `   - Capitalize the first letter properly.\n\n` +
       `3. List Assignment:\n` +
-      `   - If the user explicitly mentions adding to a specific list, match it semantically to the closest list from the provided list of user lists and set "listId" to that list's exact ID.\n` +
-      `   - If no matching list is found or the user did not specify any list, set "listId": null.\n` +
+      `   - If the user mentions adding to a specific list (e.g. "na lista cidades", "em compras", "para viagem"), match it semantically to the closest list from the provided user lists and set "listId" to that list's exact ID.\n` +
+      `   - If the speech clearly targets an existing list name or domain from the user's lists, set "listId" accordingly.\n` +
+      `   - If no matching list is found or the user did not specify any list, set "listId": null.\n\n` +
       `4. Due Date & Time:\n` +
-      `   - Resolve relative dates based on the current timestamp (e.g. today/hoje/hoy/oggi, tomorrow/amanhã/mañana/domani). Format "date" strictly as "YYYY-MM-DD". If no date is mentioned, set "date": null.\n` +
-      `   - Resolve specific times (e.g. at 8, at 2:30pm -> "14:30"). Format "time" strictly as 24-hour "HH:mm". If no time is mentioned, set "time": null.\n` +
+      `   - Resolve relative dates based on reference date/time (e.g. today/hoje, tomorrow/amanhã, next monday). Format "date" strictly as "YYYY-MM-DD". If no date is mentioned, set "date": null.\n` +
+      `   - Resolve specific times (e.g. at 8, 14:30). Format "time" strictly as 24-hour "HH:mm". If no time is mentioned, set "time": null.\n\n` +
       `5. Recurrence:\n` +
-      `   - Detect recurring patterns: "daily", "weekly", "monthly", "yearly". Otherwise set "recurrence": null.\n` +
+      `   - Detect recurring patterns: "daily", "weekly", "monthly", "yearly". Otherwise set "recurrence": null.\n\n` +
       `6. Starred / Important:\n` +
-      `   - If the user indicates urgency or importance ("urgent", "important", "starred", "importante", "urgente"), set "starred": true, otherwise false.\n` +
+      `   - If the user indicates urgency or importance ("urgent", "important", "starred", "importante", "urgente"), set "starred": true, otherwise false.\n\n` +
       `7. Return strictly valid JSON matching this schema:\n` +
       `{\n` +
       `  "isTask": boolean,\n` +

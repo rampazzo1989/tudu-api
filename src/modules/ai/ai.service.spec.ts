@@ -166,6 +166,28 @@ describe('AiService (Orchestration & Fallback)', () => {
       expect(response.providerUsed).toBe('deepseek');
     });
 
+    it('should parse voice transcript for checklist items without verbs (e.g. city destination)', async () => {
+      mockDeepSeek.parseVoiceTudu.mockResolvedValue({
+        isTask: true,
+        label: '🏛️ Roma',
+        listId: 'list-europa',
+        date: null,
+        time: null,
+        recurrence: null,
+        starred: false,
+      });
+
+      const response = await service.parseVoiceTudu('user-voice-city', {
+        transcript: 'Roma na lista Cidades da Europa',
+        now: '2026-10-14T23:00:00-03:00',
+        lists: [{ id: 'list-europa', name: 'Cidades da Europa' }],
+      });
+
+      expect(response.result.isTask).toBe(true);
+      expect(response.result.label).toBe('🏛️ Roma');
+      expect(response.result.listId).toBe('list-europa');
+    });
+
     it('should normalize invalid listId to null if not present in user lists', async () => {
       mockDeepSeek.parseVoiceTudu.mockResolvedValue({
         isTask: true,
