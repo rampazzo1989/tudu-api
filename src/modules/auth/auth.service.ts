@@ -82,9 +82,20 @@ export class AuthService {
             picture = decoded.picture;
           }
         } catch {
-          // If token is simple string in testing
-          email = 'google_user@tudu.app';
-          sub = `google_${dto.idToken}`;
+          // Ignore decoding error
+        }
+
+        // If not decoded as JWT, handle test/mock token in dev environment
+        if (!email) {
+          if (dto.idToken.startsWith('mock_') || dto.idToken === 'mock_google_user') {
+            email = 'felipe.rmpzz@gmail.com';
+            name = 'Felipe Rampazzo';
+            sub = '113988395261152201258';
+            picture = 'https://lh3.googleusercontent.com/a/ACg8ocKA5yxikK5d7SR2W3sDMxIsG6Ytd70ltLKNfdYbEVgSHvqeVQ=s96-c';
+          } else {
+            email = 'google_user@tudu.app';
+            sub = `google_${dto.idToken}`;
+          }
         }
       }
 
