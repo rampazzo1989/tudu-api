@@ -24,10 +24,22 @@ export class SyncService {
     let importedCounters = 0;
 
     await this.prisma.$transaction(async tx => {
+      // Check if snapshot contains any real user tasks for the default list ('1')
+      const allTaskGroups = [...(data.tudus || []), ...(data.archivedTudus || [])];
+      const hasUserTasksForList1 = allTaskGroups.some(
+        ([lId, pairs]) =>
+          (lId === SAMPLE_LIST_ID || lId === '1') &&
+          Array.isArray(pairs) &&
+          pairs.some(([tId]) => tId && !SAMPLE_TASK_IDS.includes(tId)),
+      );
+
       // 1. Process Lists (myLists and archivedLists)
       const allLists = [...(data.myLists || []), ...(data.archivedLists || [])];
-      for (const [id, listObj] of allLists) {
-        if (!id || id === SAMPLE_LIST_ID) continue;
+      for (const [rawId, listObj] of allLists) {
+        if (!rawId) continue;
+        const isList1 = rawId === SAMPLE_LIST_ID || rawId === '1';
+        if (isList1 && !hasUserTasksForList1) continue;
+        const id = isList1 ? `default_${userId}` : rawId;
         const listName = listObj?.name || listObj?.label;
         if (!listName) continue;
         await tx.list.upsert({
@@ -62,8 +74,11 @@ export class SyncService {
       // 2. Process Tasks (tudus, archivedTudus, unlistedTudus)
       // data.tudus is [listId, [taskId, taskObj][]][]
       const nestedTaskGroups = [...(data.tudus || []), ...(data.archivedTudus || [])];
-      for (const [listId, taskPairs] of nestedTaskGroups) {
-        if (!Array.isArray(taskPairs) || listId === SAMPLE_LIST_ID) continue;
+      for (const [rawListId, taskPairs] of nestedTaskGroups) {
+        if (!Array.isArray(taskPairs)) continue;
+        const isList1 = rawListId === SAMPLE_LIST_ID || rawListId === '1';
+        if (isList1 && !hasUserTasksForList1) continue;
+        const listId = isList1 ? `default_${userId}` : rawListId;
         for (const [id, task] of taskPairs) {
           if (!id || SAMPLE_TASK_IDS.includes(id)) continue;
           const taskTitle = task?.title || task?.label;
@@ -247,7 +262,7 @@ export class SyncService {
     const conflictTaskIds: string[] = [];
     const conflictCounterIds: string[] = [];
 
-    // 1. Apply Incoming Mutations from Client with Timestamp Protection (Batch Processed)
+    const createdListIds = new Set<string>();
     if (dto.lists && dto.lists.length > 0) {
       const listIds = dto.lists.map(l => l.id);
       const existingLists = await this.prisma.list.findMany({
@@ -259,30 +274,38 @@ export class SyncService {
       const listUpdates: any[] = [];
 
       for (const item of dto.lists) {
-        if (!item?.id || item.id === SAMPLE_LIST_ID) continue;
+        if (!item?.id) continue;
+        let listId = item.id;
+        if (listId === SAMPLE_LIST_ID || listId === '1') {
+          const hasUserTasksInDelta = (dto.tasks || []).some(
+            t => (t.listId === SAMPLE_LIST_ID || t.listId === '1') && t.id && !SAMPLE_TASK_IDS.includes(t.id),
+          );
+          if (!hasUserTasksInDelta) continue;
+          listId = `default_${userId}`;
+        }
         const deletedAt = item.deletedAt ? this.parseTimestamp(item.deletedAt) : null;
         const listName = item.name || item.label || 'Lista';
         const incomingUpdatedAt = this.parseTimestamp(item.updatedAt);
 
-        const existing = existingMap.get(item.id);
+        const existing = existingMap.get(listId);
 
         if (existing) {
           if (existing.userId !== userId) {
-            this.logger.warn(`User ${userId} attempted to mutate list ${item.id} belonging to another user`);
+            this.logger.warn(`User ${userId} attempted to mutate list ${listId} belonging to another user`);
             continue;
           }
 
           if (existing.updatedAt && existing.updatedAt.getTime() > incomingUpdatedAt.getTime()) {
             this.logger.log(
-              `[Conflict] Skipping list ${item.id}: DB record (${existing.updatedAt.toISOString()}) is newer than incoming (${incomingUpdatedAt.toISOString()})`,
+              `[Conflict] Skipping list ${listId}: DB record (${existing.updatedAt.toISOString()}) is newer than incoming (${incomingUpdatedAt.toISOString()})`,
             );
-            conflictListIds.push(item.id);
+            conflictListIds.push(listId);
             continue;
           }
 
           listUpdates.push(
             this.prisma.list.update({
-              where: { id: item.id },
+              where: { id: listId },
               data: {
                 name: listName,
                 color: item.color || null,
@@ -298,8 +321,9 @@ export class SyncService {
             }),
           );
         } else {
+          createdListIds.add(listId);
           listCreates.push({
-            id: item.id,
+            id: listId,
             userId,
             name: listName,
             color: item.color || null,
@@ -330,11 +354,40 @@ export class SyncService {
       });
       const existingMap = new Map(existingTasks.map(t => [t.id, t]));
 
+      // Verify and collect valid list IDs for foreign key safety
+      const existingUserLists = await this.prisma.list.findMany({
+        where: { userId },
+        select: { id: true },
+      });
+      const validUserListIds = new Set(existingUserLists.map(l => l.id));
+      createdListIds.forEach(id => validUserListIds.add(id));
+
       const taskCreates: any[] = [];
       const taskUpdates: any[] = [];
 
       for (const item of dto.tasks) {
-        if (!item?.id || item.listId === SAMPLE_LIST_ID || SAMPLE_TASK_IDS.includes(item.id)) continue;
+        if (!item?.id || SAMPLE_TASK_IDS.includes(item.id)) continue;
+
+        let targetListId = item.listId || null;
+        if (targetListId === SAMPLE_LIST_ID || targetListId === '1') {
+          targetListId = `default_${userId}`;
+          if (!validUserListIds.has(targetListId)) {
+            await this.prisma.list.upsert({
+              where: { id: targetListId },
+              update: { deletedAt: null },
+              create: {
+                id: targetListId,
+                userId,
+                name: 'Minha Lista',
+              },
+            });
+            validUserListIds.add(targetListId);
+          }
+        } else if (targetListId && !validUserListIds.has(targetListId)) {
+          // If referenced listId doesn't exist, fallback to null (unlisted) rather than crashing with FK violation
+          targetListId = null;
+        }
+
         const deletedAt = item.deletedAt ? this.parseTimestamp(item.deletedAt) : null;
         const taskTitle = item.title || item.label || 'Tarefa';
         const taskOrder =
@@ -363,7 +416,7 @@ export class SyncService {
             this.prisma.task.update({
               where: { id: item.id },
               data: {
-                listId: item.listId || null,
+                listId: targetListId,
                 title: taskTitle,
                 description: item.description || null,
                 done: !!item.done,
@@ -384,7 +437,7 @@ export class SyncService {
           taskCreates.push({
             id: item.id,
             userId,
-            listId: item.listId || null,
+            listId: targetListId,
             title: taskTitle,
             description: item.description || null,
             done: !!item.done,
@@ -523,14 +576,6 @@ export class SyncService {
       where: {
         userId,
         id: { notIn: SAMPLE_TASK_IDS },
-        AND: [
-          {
-            OR: [
-              { listId: null },
-              { listId: { not: SAMPLE_LIST_ID } },
-            ],
-          },
-        ],
         OR: [
           { updatedAt: { gt: lastSyncDate } },
           ...(conflictTaskIds.length > 0 ? [{ id: { in: conflictTaskIds } }] : []),
@@ -601,10 +646,6 @@ export class SyncService {
         userId,
         deletedAt: null,
         id: { notIn: SAMPLE_TASK_IDS },
-        OR: [
-          { listId: null },
-          { listId: { not: SAMPLE_LIST_ID } },
-        ],
       },
     });
 

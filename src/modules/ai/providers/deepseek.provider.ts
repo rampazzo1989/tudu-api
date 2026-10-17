@@ -217,20 +217,20 @@ export class DeepSeekProvider implements IAiProvider {
   async parseVoiceTudu(params: ParseVoiceTuduParams, signal?: AbortSignal): Promise<ParsedVoiceTuduResult> {
     const cleanLocale = (params.locale || 'pt-BR').toLowerCase().replace('_', '-');
     let targetLanguage = 'Portuguese';
-    let targetExample = '"🥖 Comprar pão", "🏛️ Roma", "🥛 Leite integral", "🦷 Marcar dentista", "🎬 Interestelar", "🧳 Passaporte"';
+    let targetExample = '"🥖 Comprar pão", "⏰ Acordar", "💊 Tomar remédio", "🏛️ Roma", "🦷 Marcar dentista", "🎬 Interestelar", "🧳 Passaporte"';
     let fillerExamples = '"oi tudo bem", "que horas são", "bom dia", "como vai você"';
 
     if (cleanLocale.startsWith('en')) {
       targetLanguage = 'English';
-      targetExample = '"🥖 Buy bread", "🏛️ Rome", "🥛 Whole milk", "🦷 Dentist appointment", "🎬 Interstellar", "🧳 Passport"';
+      targetExample = '"🥖 Buy bread", "⏰ Wake up", "💊 Take medicine", "🏛️ Rome", "🦷 Dentist appointment", "🎬 Interstellar", "🧳 Passport"';
       fillerExamples = '"hello how are you", "what time is it", "good morning", "how are you doing"';
     } else if (cleanLocale.startsWith('es')) {
       targetLanguage = 'Spanish';
-      targetExample = '"🥖 Comprar pan", "🏛️ Roma", "🥛 Leche entera", "🦷 Cita con el dentista", "🎬 Interestelar", "🧳 Pasaporte"';
+      targetExample = '"🥖 Comprar pan", "⏰ Despertar", "💊 Tomar medicina", "🏛️ Roma", "🦷 Cita con el dentista", "🎬 Interestelar", "🧳 Pasaporte"';
       fillerExamples = '"hola cómo estás", "qué hora es", "buenos días", "cómo te va"';
     } else if (cleanLocale.startsWith('it')) {
       targetLanguage = 'Italian';
-      targetExample = '"🥖 Comprare il pane", "🏛️ Roma", "🥛 Latte intero", "🦷 Dentista", "🎬 Interstellar", "🧳 Passaporto"';
+      targetExample = '"🥖 Comprare il pane", "⏰ Sveglia", "💊 Prendere la medicina", "🏛️ Roma", "🦷 Dentista", "🎬 Interstellar", "🧳 Passaporto"';
       fillerExamples = '"ciao come stai", "che ore sono", "buongiorno", "come va"';
     }
 
@@ -241,25 +241,28 @@ export class DeepSeekProvider implements IAiProvider {
         : '\nUser has no custom lists.';
 
     const systemPrompt =
-      `You are an intelligent voice assistant in a todo and checklist app (Tudú). Your job is to analyze natural language speech transcripts from the user and parse them into a structured task or checklist item.\n` +
+      `You are an intelligent voice assistant in a todo, reminder, and checklist app (Tudú). Your job is to analyze natural language speech transcripts from the user and parse them into a structured task, reminder, or checklist item.\n` +
       `CRITICAL LANGUAGE REQUIREMENT: The user's app is in ${targetLanguage}. The output task "label" MUST be written strictly in ${targetLanguage} (e.g. ${targetExample}). NEVER return the label in Portuguese or any other language unless ${targetLanguage} is Portuguese.\n\n` +
       `Rules:\n` +
-      `1. What is a task / tudú item? (BROAD CHECKLIST RECOGNITION):\n` +
-      `   - In Tudú, a task is ANY item that belongs to a to-do list, checklist, packing list, grocery list, or idea list. It DOES NOT need to contain an action verb.\n` +
+      `1. What is a task / tudú item? (BROAD TASK, HABIT, ALARM & REMINDER RECOGNITION):\n` +
+      `   - In Tudú, a task is ANY item that belongs to a to-do list, checklist, grocery list, or scheduled reminder/alarm. The app actively alerts, calls, and reminds users about their tasks, which users check off as completed.\n` +
       `   - VALID TASKS INCLUDE:\n` +
-      `     a) Nouns, places, travel destinations, or cities (e.g., "Roma", "Paris", "Tóquio") for travel/places lists.\n` +
-      `     b) Groceries, supermarket items, ingredients, products (e.g., "Leite", "Café", "Pão", "Detergente").\n` +
-      `     c) Media, books, movies, games, or topics (e.g., "Matrix", "Interestelar", "Clean Code").\n` +
-      `     d) Packing, gear, or personal items (e.g., "Passaporte", "Protetor solar", "Carregador").\n` +
-      `     e) Single words, short phrases, nouns, checklist checkables, or notes.\n` +
-      `     f) Traditional action items and chores with verbs (e.g., "Limpar o chão", "Marcar dentista", "Pagar boleto").\n` +
-      `   - ONLY return {"isTask": false, "reason": "not_a_task"} if the speech is truly empty, conversational filler/pleasantries (e.g. ${fillerExamples}), casual chatter, assistant queries (e.g. "que horas são", "quem é você"), microphone noise, or incomprehensible babble.\n` +
-      `   - If the user dictates a single noun or entity (e.g., "Roma", "Banana", "Chuveiro"), IT IS A VALID TASK (isTask: true).\n\n` +
+      `     a) Reminders, wake-up alarms, routines, personal habits, and time-scheduled events (e.g., "Wake up at 7:00", "Acordar amanhã às 7", "Take medication", "Tomar remédio", "Drink water", "Beber água", "Go to gym", "Call mom", "Ligar para mãe"). These are 100% VALID TASKS (isTask: true).\n` +
+      `     b) Traditional action items and chores with verbs (e.g., "Clean kitchen", "Limpar o chão", "Dentist appointment", "Marcar dentista", "Pay electricity bill", "Pagar boleto").\n` +
+      `     c) Nouns, places, travel destinations, or cities (e.g., "Rome", "Paris", "Tokyo") for travel/places lists.\n` +
+      `     d) Groceries, supermarket items, ingredients, products (e.g., "Milk", "Coffee", "Bread").\n` +
+      `     e) Media, books, movies, games, or topics (e.g., "Matrix", "Interstellar", "Clean Code").\n` +
+      `     f) Packing, gear, or personal items (e.g., "Passport", "Sunscreen", "Charger").\n` +
+      `     g) Single words, short phrases, nouns, checklist checkables, or notes.\n` +
+      `   - NEVER classify reminders, wake-up calls, wake-up alarms, habits, or personal routines as "not_a_task" or "assistant queries". They are actionable tasks the user wants Tudú to track, alert, call, or check off.\n` +
+      `   - ONLY return {"isTask": false, "reason": "not_a_task"} if the speech is truly empty, conversational filler/pleasantries (e.g. ${fillerExamples}), general chit-chat, pure assistant queries with no actionable intent (e.g. "what time is it", "who are you", "what is the weather"), microphone noise, or incomprehensible babble.\n` +
+      `   - If the user dictates a single noun or entity (e.g., "Rome", "Banana", "Shower"), IT IS A VALID TASK (isTask: true).\n\n` +
       `2. Task Title / Label:\n` +
       `   - Extract the clean item or task description.\n` +
-      `   - Strip out conversational command preambles such as "adicionar", "colocar", "anotar", "põe", "inserir", "lembrar de", "add", "put", "record", "new task" if they are merely meta-instructions to create the item.\n` +
-      `   - Strip out date, time, list name, and recurrence keywords from the label so the title remains clean.\n` +
-      `   - It MUST start with an appropriate emoji corresponding to the item or action (e.g., "🏛️ Roma", "🥖 Pão", "🎬 Inception", "🧹 Limpar o chão", "🥛 Leite").\n` +
+      `   - Strip out conversational meta-instructions such as "adicionar", "colocar", "anotar", "põe", "inserir", "lembrar de", "me lembre de", "add", "put", "record", "new task", "remind me to".\n` +
+      `   - CRITICAL: DO NOT strip the core action verb of the task! Verbs like "Wake up", "Acordar", "Despertar", "Call", "Ligar", "Take", "Tomar", "Go", "Ir", "Drink", "Beber", "Sleep", "Dormir" are part of the task title itself, NOT meta-instructions.\n` +
+      `   - Strip out date, time, list name, and recurrence keywords from the label so the title remains clean (e.g., "wake up tomorrow at 7:00" -> label: "⏰ Wake up", date: "<tomorrow's date>", time: "07:00").\n` +
+      `   - It MUST start with an appropriate emoji corresponding to the item or action (e.g., "⏰ Wake up", "⏰ Acordar", "💊 Take medicine", "🥖 Bread", "🎬 Inception", "🧹 Clean house").\n` +
       `   - It MUST be expressed in ${targetLanguage}.\n` +
       `   - Capitalize the first letter properly.\n\n` +
       `3. List Assignment:\n` +

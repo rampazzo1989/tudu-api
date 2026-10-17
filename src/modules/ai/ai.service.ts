@@ -207,6 +207,25 @@ export class AiService {
         result.isTask = false;
         result.reason = 'not_a_task';
       }
+    } else {
+      // Safety net: check if the user transcript actually represents an actionable task, habit, wake-up alarm or reminder
+      // that the model incorrectly flagged as not_a_task
+      const lower = cleanTranscript.toLowerCase().trim();
+      const hasActionOrReminder = /\b(wake(\s+me)?\s+up|acordar|despertar|sveglia|despierta|lembr|remind|tomar|take|comprar|buy|fazer|do|call|ligar|ir|go|reuni|meet|pagar|pay|trein|workout|gym|academia|beber|drink|limpar|clean|exerc|dormir|sleep)\b/i.test(lower);
+      const hasTimeOrDate = /\b(amanh[aã]|tomorrow|mañana|domani|hoje|today|hoy|oggi|\d{1,2}(:\d{2}|h|\s*(am|pm))|segunda|terça|quarta|quinta|sexta|s[aá]bado|domingo|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(lower);
+
+      if (hasActionOrReminder || hasTimeOrDate) {
+        result.isTask = true;
+        result.reason = null;
+        if (!result.label || !result.label.trim()) {
+          const emoji = /\b(wake|acordar|despertar|sveglia|despierta|alarm|hor[aá]rio)\b/i.test(lower)
+            ? '⏰'
+            : /\b(tomar|rem[eé]dio|pill|medicine|medica)\b/i.test(lower)
+            ? '💊'
+            : '📝';
+          result.label = `${emoji} ${cleanTranscript.charAt(0).toUpperCase() + cleanTranscript.slice(1)}`;
+        }
+      }
     }
 
     return {

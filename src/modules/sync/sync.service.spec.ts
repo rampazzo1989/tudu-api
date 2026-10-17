@@ -380,6 +380,80 @@ describe('SyncService (Offline-First Cloud Sync)', () => {
         }),
       );
     });
+
+    it('should successfully save user tasks sent for default list (listId 1) mapped to default_userId without losing them', async () => {
+      const deltaDto = {
+        lastSyncTimestamp: 1700000000000,
+        tasks: [
+          {
+            id: 'real-user-task-in-list-1',
+            listId: '1',
+            title: 'Minha Tarefa Real',
+            done: false,
+            updatedAt: 1700000060000,
+          },
+        ],
+      };
+
+      mockPrisma.list.findMany.mockResolvedValue([]);
+      mockPrisma.task.findMany.mockResolvedValue([]);
+      mockPrisma.counter.findMany.mockResolvedValue([]);
+      mockPrisma.userSettings.findUnique.mockResolvedValue(null);
+
+      await service.syncDelta('user-1', deltaDto);
+
+      // Verify list was created/upserted for user
+      expect(mockPrisma.list.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'default_user-1' },
+          create: expect.objectContaining({ id: 'default_user-1', userId: 'user-1' }),
+        }),
+      );
+      // Verify task was created linked to default_user-1
+      expect(mockPrisma.task.createMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: [
+            expect.objectContaining({
+              id: 'real-user-task-in-list-1',
+              listId: 'default_user-1',
+            }),
+          ],
+        }),
+      );
+    });
+
+    it('should fallback to listId null when referenced listId does not exist to avoid foreign key errors', async () => {
+      const deltaDto = {
+        lastSyncTimestamp: 1700000000000,
+        tasks: [
+          {
+            id: 'orphan-task',
+            listId: 'non-existent-list',
+            title: 'Tarefa Órfã',
+            done: false,
+            updatedAt: 1700000060000,
+          },
+        ],
+      };
+
+      mockPrisma.list.findMany.mockResolvedValue([]);
+      mockPrisma.task.findMany.mockResolvedValue([]);
+      mockPrisma.counter.findMany.mockResolvedValue([]);
+      mockPrisma.userSettings.findUnique.mockResolvedValue(null);
+
+      await service.syncDelta('user-1', deltaDto);
+
+      expect(mockPrisma.task.createMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: [
+            expect.objectContaining({
+              id: 'orphan-task',
+              listId: null,
+            }),
+          ],
+        }),
+      );
+    });
   });
 
   describe('exportBackup', () => {

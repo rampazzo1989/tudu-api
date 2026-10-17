@@ -249,6 +249,27 @@ describe('AiService (Orchestration & Fallback)', () => {
         service.parseVoiceTudu(userId, { transcript: 'task 3', now: '2026-10-14T23:00:00Z' }),
       ).rejects.toThrow(HttpException);
     });
+
+    it('should recover actionable reminder transcript when provider incorrectly returns not_a_task', async () => {
+      mockDeepSeek.parseVoiceTudu.mockResolvedValue({
+        isTask: false,
+        reason: 'not_a_task',
+        label: '',
+        listId: null,
+        date: null,
+        time: null,
+        recurrence: null,
+        starred: false,
+      });
+
+      const response = await service.parseVoiceTudu('user-safety-net', {
+        transcript: 'wake up tomorrow at 7:00',
+        now: '2026-10-14T23:00:00Z',
+      });
+
+      expect(response.result.isTask).toBe(true);
+      expect(response.result.label).toContain('Wake up tomorrow at 7:00');
+    });
   });
 
   describe('getQuotaStatus', () => {
