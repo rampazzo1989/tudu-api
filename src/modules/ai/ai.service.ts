@@ -103,8 +103,8 @@ export class AiService {
   async parseList(userId: string, params: ParseListParams): Promise<{ result: ParsedListResult; providerUsed: string }> {
     this.checkAndIncrementQuota(userId, 'parses');
 
-    const cleanText = sanitizeInputText(params.rawText, 'rawText', 3000);
-    const cleanCustomPrompt = params.customPrompt ? sanitizeInputText(params.customPrompt, 'customPrompt', 200) : undefined;
+    const cleanText = sanitizeInputText(params.rawText, 'rawText', 6000);
+    const cleanCustomPrompt = params.customPrompt ? sanitizeInputText(params.customPrompt, 'customPrompt', 400) : undefined;
 
     const sanitizedParams: ParseListParams = {
       rawText: cleanText,

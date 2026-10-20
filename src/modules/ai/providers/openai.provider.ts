@@ -129,7 +129,7 @@ export class OpenAiProvider implements IAiProvider {
       this.parseModel, // Strictly gpt-5.6-luna
       systemPrompt,
       userPrompt,
-      1500,
+      3000,
       0.2,
       signal,
     );

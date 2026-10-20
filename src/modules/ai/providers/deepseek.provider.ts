@@ -128,7 +128,7 @@ export class DeepSeekProvider implements IAiProvider {
       this.modelReasoning,
       systemPrompt,
       userPrompt,
-      1500,
+      3000,
       0.2,
       signal,
     );
