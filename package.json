@@ -30,6 +30,8 @@
     "@nestjs/swagger": "^7.3.1",
     "@nestjs/throttler": "^5.1.2",
     "@prisma/client": "^5.12.1",
+    "ask-sdk-core": "^2.14.0",
+    "ask-sdk-model": "^1.86.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "google-auth-library": "^9.7.0",

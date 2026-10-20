@@ -8,6 +8,7 @@ import { UsersModule } from './modules/users/users.module';
 import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
 import { AiModule } from './modules/ai/ai.module';
 import { SyncModule } from './modules/sync/sync.module';
+import { AlexaModule } from './modules/alexa/alexa.module';
 import { HttpLoggerMiddleware } from './common/middleware/http-logger.middleware';
 import { AppController } from './app.controller';
 
@@ -29,6 +30,7 @@ import { AppController } from './app.controller';
     SubscriptionsModule,
     AiModule,
     SyncModule,
+    AlexaModule,
   ],
   controllers: [AppController],
   providers: [
