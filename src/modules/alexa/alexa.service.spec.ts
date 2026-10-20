@@ -258,5 +258,53 @@ describe('AlexaService', () => {
       expect(stopRes.response.outputSpeech.text).toContain('Até logo');
       expect(stopRes.response.shouldEndSession).toBe(true);
     });
+
+    it('returns empty 200 response without card or speech for AlexaHouseholdListEvent even without accessToken', async () => {
+      const response = await service.handleAlexaWebhook({
+        context: {
+          System: {
+            user: { userId: 'amzn1.ask.account.test' },
+            apiEndpoint: 'https://api.amazonalexa.com',
+            apiAccessToken: 'mock_api_token',
+          },
+        },
+        request: {
+          type: 'AlexaHouseholdListEvent.ItemsCreated',
+          body: {
+            listId: 'mock_list_id',
+            listItemIds: ['item_1'],
+          },
+        },
+      });
+
+      expect(response).toEqual({ version: '1.0', response: {} });
+      expect(response.response.card).toBeUndefined();
+      expect(response.response.outputSpeech).toBeUndefined();
+    });
+
+    it('associates amazonUserId with user during interactive requests', async () => {
+      await service.handleAlexaWebhook({
+        context: {
+          System: {
+            user: {
+              userId: 'amzn1.ask.account.12345',
+              accessToken: 'valid_user_access_token',
+            },
+          },
+        },
+        request: { type: 'LaunchRequest' },
+      });
+
+      expect(prisma.userSettings.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { userId: mockUser.id },
+          update: expect.objectContaining({
+            generalSettings: expect.objectContaining({
+              alexaUserId: 'amzn1.ask.account.12345',
+            }),
+          }),
+        }),
+      );
+    });
   });
 });

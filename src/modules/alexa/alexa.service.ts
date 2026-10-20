@@ -215,45 +215,36 @@ export class AlexaService {
       return { version: '1.0', response: {} };
     }
 
-    // Authenticate user from Alexa Access Token
-    const accessToken =
-      body?.context?.System?.user?.accessToken || body?.session?.user?.accessToken;
-
-    if (!accessToken) {
-      return this.buildAccountLinkingResponse();
+    // Alexa Household List Events and System Events are asynchronous out-of-session events.
+    // They MUST NEVER return outputSpeech or cards (like LinkAccount), which causes Alexa
+    // to fail list synchronization and say "Estou com problemas para acessar sua skill".
+    if (
+      requestType.startsWith('AlexaHouseholdListEvent.') ||
+      requestType.startsWith('AlexaSkillEvent.') ||
+      requestType.startsWith('SkillEnabled') ||
+      requestType.startsWith('SkillDisabled') ||
+      requestType.startsWith('SkillPermission')
+    ) {
+      return this.handleSystemOrListEvent(requestType, body);
     }
 
-    let user: any = null;
-    try {
-      const payload = this.jwtService.verify(accessToken);
-      if (payload?.sub) {
-        user = await this.prisma.user.findUnique({
-          where: { id: payload.sub },
-        });
-      }
-    } catch {
-      this.logger.warn('Invalid Alexa access token provided');
-    }
-
+    // Authenticate user for interactive sessions (LaunchRequest, IntentRequest)
+    const user = await this.resolveUserFromPayload(body);
     if (!user) {
       return this.buildAccountLinkingResponse();
+    }
+
+    // Associate Amazon Alexa userId with Tudú user for future background list events
+    const amazonUserId = body?.context?.System?.user?.userId;
+    if (amazonUserId) {
+      this.associateAlexaUserId(user.id, amazonUserId).catch((err) =>
+        this.logger.warn(`Could not associate Alexa userId: ${err?.message}`),
+      );
     }
 
     // Dispatch by request type
     if (requestType === 'LaunchRequest') {
       return this.handleLaunchRequest(user);
-    }
-
-    if (requestType === ALEXA_LIST_EVENTS.ITEMS_CREATED) {
-      return this.handleListItemsCreated(user, body);
-    }
-
-    if (requestType === ALEXA_LIST_EVENTS.ITEMS_UPDATED) {
-      return this.handleListItemsUpdated(user, body);
-    }
-
-    if (requestType === ALEXA_LIST_EVENTS.ITEMS_DELETED) {
-      return this.handleListItemsDeleted(user, body);
     }
 
     if (requestType === 'IntentRequest') {
@@ -732,5 +723,78 @@ export class AlexaService {
     }
 
     return { version: '1.0', response: {} };
+  }
+
+  private async handleSystemOrListEvent(requestType: string, body: any): Promise<any> {
+    try {
+      const user = await this.resolveUserFromPayload(body);
+      if (user) {
+        if (requestType === ALEXA_LIST_EVENTS.ITEMS_CREATED) {
+          await this.handleListItemsCreated(user, body);
+        } else if (requestType === ALEXA_LIST_EVENTS.ITEMS_UPDATED) {
+          await this.handleListItemsUpdated(user, body);
+        } else if (requestType === ALEXA_LIST_EVENTS.ITEMS_DELETED) {
+          await this.handleListItemsDeleted(user, body);
+        }
+      } else {
+        this.logger.warn(`No user resolved for Alexa event ${requestType}`);
+      }
+    } catch (err: any) {
+      this.logger.error(`Error processing Alexa event ${requestType}:`, err?.message);
+    }
+
+    // Always return empty 200 response for events
+    return { version: '1.0', response: {} };
+  }
+
+  private async resolveUserFromPayload(body: any): Promise<any> {
+    const accessToken =
+      body?.context?.System?.user?.accessToken || body?.session?.user?.accessToken;
+
+    if (accessToken) {
+      try {
+        const payload = this.jwtService.verify(accessToken);
+        if (payload?.sub) {
+          const user = await this.prisma.user.findUnique({
+            where: { id: payload.sub },
+          });
+          if (user) return user;
+        }
+      } catch {
+        this.logger.warn('Invalid Alexa access token provided in payload');
+      }
+    }
+
+    // Fallback: Check if Amazon Alexa userId is mapped in UserSettings
+    const amazonUserId = body?.context?.System?.user?.userId;
+    if (amazonUserId) {
+      const settings = await this.prisma.userSettings.findFirst({
+        where: {
+          generalSettings: {
+            path: ['alexaUserId'],
+            equals: amazonUserId,
+          },
+        },
+        include: { user: true },
+      });
+      if (settings?.user) {
+        return settings.user;
+      }
+    }
+
+    return null;
+  }
+
+  private async associateAlexaUserId(userId: string, alexaUserId: string): Promise<void> {
+    const settings = await this.prisma.userSettings.findUnique({ where: { userId } });
+    const generalSettings = (settings?.generalSettings as Record<string, any>) || {};
+    if (generalSettings.alexaUserId !== alexaUserId) {
+      generalSettings.alexaUserId = alexaUserId;
+      await this.prisma.userSettings.upsert({
+        where: { userId },
+        update: { generalSettings },
+        create: { userId, generalSettings },
+      });
+    }
   }
 }
