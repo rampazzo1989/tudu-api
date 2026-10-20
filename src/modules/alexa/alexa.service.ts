@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   ALEXA_INTENTS,
+  ALEXA_LIST_EVENTS,
   ALEXA_PAIRING_TTL_MS,
   ALEXA_AUTH_CODE_TTL_SECONDS,
   ALEXA_ACCESS_TOKEN_TTL_SECONDS,
@@ -241,6 +242,18 @@ export class AlexaService {
     // Dispatch by request type
     if (requestType === 'LaunchRequest') {
       return this.handleLaunchRequest(user);
+    }
+
+    if (requestType === ALEXA_LIST_EVENTS.ITEMS_CREATED) {
+      return this.handleListItemsCreated(user, body);
+    }
+
+    if (requestType === ALEXA_LIST_EVENTS.ITEMS_UPDATED) {
+      return this.handleListItemsUpdated(user, body);
+    }
+
+    if (requestType === ALEXA_LIST_EVENTS.ITEMS_DELETED) {
+      return this.handleListItemsDeleted(user, body);
     }
 
     if (requestType === 'IntentRequest') {
@@ -589,5 +602,135 @@ export class AlexaService {
         shouldEndSession: true,
       },
     };
+  }
+
+  // ==========================================
+  // ALEXA HOUSEHOLD LIST EVENTS (NATIVE LISTS)
+  // ==========================================
+
+  private async handleListItemsCreated(user: any, body: any) {
+    const listId = body?.request?.body?.listId;
+    const listItemIds: string[] = body?.request?.body?.listItemIds || [];
+    const apiEndpoint = body?.context?.System?.apiEndpoint || 'https://api.amazonalexa.com';
+    const apiAccessToken = body?.context?.System?.apiAccessToken;
+
+    if (!apiAccessToken || !listId || listItemIds.length === 0) {
+      return { version: '1.0', response: {} };
+    }
+
+    for (const itemId of listItemIds) {
+      try {
+        const res = await fetch(`${apiEndpoint}/v2/householdlists/${listId}/items/${itemId}`, {
+          headers: {
+            Authorization: `Bearer ${apiAccessToken}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (res.ok) {
+          const itemData = await res.json();
+          if (itemData?.value && itemData.value.trim()) {
+            const taskTitle =
+              itemData.value.trim().charAt(0).toUpperCase() + itemData.value.trim().slice(1);
+            await this.prisma.task.create({
+              data: {
+                id: randomUUID(),
+                userId: user.id,
+                title: taskTitle,
+                dueDate: new Date(),
+                hasTime: false,
+                done: itemData.status === 'completed',
+                isUnlisted: true,
+                order: 0,
+                description: `alexa_item_id:${itemData.id}`,
+              },
+            });
+            this.logger.log(`Created Tudú task from Alexa list event: "${taskTitle}" for user ${user.email}`);
+          }
+        }
+      } catch (err: any) {
+        this.logger.error(`Error syncing created list item ${itemId} from Alexa:`, err?.message);
+      }
+    }
+
+    return { version: '1.0', response: {} };
+  }
+
+  private async handleListItemsUpdated(user: any, body: any) {
+    const listId = body?.request?.body?.listId;
+    const listItemIds: string[] = body?.request?.body?.listItemIds || [];
+    const apiEndpoint = body?.context?.System?.apiEndpoint || 'https://api.amazonalexa.com';
+    const apiAccessToken = body?.context?.System?.apiAccessToken;
+
+    if (!apiAccessToken || !listId || listItemIds.length === 0) {
+      return { version: '1.0', response: {} };
+    }
+
+    for (const itemId of listItemIds) {
+      try {
+        const res = await fetch(`${apiEndpoint}/v2/householdlists/${listId}/items/${itemId}`, {
+          headers: {
+            Authorization: `Bearer ${apiAccessToken}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (res.ok) {
+          const itemData = await res.json();
+          // Find matching task by alexa_item_id or title
+          const task = await this.prisma.task.findFirst({
+            where: {
+              userId: user.id,
+              OR: [
+                { description: { contains: `alexa_item_id:${itemData.id}` } },
+                { title: { equals: itemData.value, mode: 'insensitive' } },
+              ],
+            },
+          });
+
+          if (task) {
+            await this.prisma.task.update({
+              where: { id: task.id },
+              data: {
+                done: itemData.status === 'completed',
+                title: itemData.value || task.title,
+              },
+            });
+            this.logger.log(`Updated Tudú task status to ${itemData.status} from Alexa list event`);
+          }
+        }
+      } catch (err: any) {
+        this.logger.error(`Error syncing updated list item ${itemId} from Alexa:`, err?.message);
+      }
+    }
+
+    return { version: '1.0', response: {} };
+  }
+
+  private async handleListItemsDeleted(user: any, body: any) {
+    const listItemIds: string[] = body?.request?.body?.listItemIds || [];
+
+    for (const itemId of listItemIds) {
+      try {
+        const task = await this.prisma.task.findFirst({
+          where: {
+            userId: user.id,
+            description: { contains: `alexa_item_id:${itemId}` },
+          },
+        });
+
+        if (task) {
+          await this.prisma.task.update({
+            where: { id: task.id },
+            data: { deletedAt: new Date() },
+          });
+          this.logger.log(`Soft-deleted Tudú task from Alexa list deleted event`);
+        }
+      } catch (err: any) {
+        this.logger.error(`Error deleting task for Alexa item ${itemId}:`, err?.message);
+      }
+    }
+
+    return { version: '1.0', response: {} };
   }
 }
