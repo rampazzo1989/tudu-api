@@ -306,6 +306,33 @@ describe('AlexaService', () => {
       expect(response.response.outputSpeech.text).toContain('Estudar física');
     });
 
+    it('cleans conversational prefixes like "seria comprar melão" and creates task "Comprar melão"', async () => {
+      const response = await service.handleAlexaWebhook({
+        session: {
+          user: { accessToken: 'valid_user_access_token' },
+          attributes: { awaitingTaskTitle: true },
+        },
+        request: {
+          type: 'IntentRequest',
+          intent: {
+            name: ALEXA_INTENTS.CREATE_TASK,
+            slots: {
+              taskTitle: { value: 'seria comprar melão' },
+            },
+          },
+        },
+      });
+
+      expect(prisma.task.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            title: 'Comprar melão',
+          }),
+        }),
+      );
+      expect(response.response.outputSpeech.text).toContain('Comprar melão');
+    });
+
     it('reprompts with Dialog.ElicitSlot if FallbackIntent is triggered while awaitingTaskTitle', async () => {
       const response = await service.handleAlexaWebhook({
         session: {

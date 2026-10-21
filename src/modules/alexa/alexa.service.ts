@@ -763,7 +763,7 @@ export class AlexaService {
 
     // Regex to remove conversational prefixes when answering "qual o nome da tarefa?"
     const prefixRegex =
-      /^(o\s+nome\s+da\s+tarefa\s+[ée]\s+|o\s+nome\s+[ée]\s+|o\s+t[íi]tulo\s+[ée]\s+|a\s+tarefa\s+[ée]\s+|[ée]\s+|chama\s+|adicionar\s+(uma\s+nova\s+tarefa\s+|uma\s+tarefa\s+|nova\s+tarefa\s+|tarefa\s+)?|anotar\s+(uma\s+nova\s+tarefa\s+|uma\s+tarefa\s+|nova\s+tarefa\s+|tarefa\s+)?|criar\s+(uma\s+nova\s+tarefa\s+|uma\s+tarefa\s+|nova\s+tarefa\s+|tarefa\s+)?|colocar\s+(uma\s+tarefa\s+|tarefa\s+)?)/i;
+      /^(o\s+nome\s+da\s+tarefa\s+[ée]\s+|o\s+nome\s+[ée]\s+|o\s+t[íi]tulo\s+[ée]\s+|minha\s+tarefa\s+[ée]\s+|a\s+tarefa\s+[ée]\s+|tarefa\s+[ée]\s+|[ée]\s+|chama\s+|seria\s+|pode\s+ser\s+|salva\s+|coloca\s+|quero\s+(adicionar\s+|anotar\s+|criar\s+|colocar\s+)?|adicionar\s+(uma\s+nova\s+tarefa\s+|uma\s+tarefa\s+|nova\s+tarefa\s+|tarefa\s+)?|anotar\s+(uma\s+nova\s+tarefa\s+|uma\s+tarefa\s+|nova\s+tarefa\s+|tarefa\s+)?|criar\s+(uma\s+nova\s+tarefa\s+|uma\s+tarefa\s+|nova\s+tarefa\s+|tarefa\s+)?|colocar\s+(uma\s+tarefa\s+|tarefa\s+)?)/i;
 
     title = title.replace(prefixRegex, '').trim();
 
