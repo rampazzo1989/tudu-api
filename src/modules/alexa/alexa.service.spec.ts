@@ -221,6 +221,117 @@ describe('AlexaService', () => {
       expect(response.response.outputSpeech.text).toContain('14 horas e 30');
     });
 
+    it('elicts taskTitle with Dialog.ElicitSlot when user says "adicionar uma nova tarefa" without title', async () => {
+      const response = await service.handleAlexaWebhook({
+        session: { user: { accessToken: 'valid_user_access_token' } },
+        request: {
+          type: 'IntentRequest',
+          intent: {
+            name: ALEXA_INTENTS.CREATE_TASK,
+            slots: {},
+          },
+        },
+      });
+
+      expect(response.response.outputSpeech.text).toBe('Qual o nome da tarefa?');
+      expect(response.response.shouldEndSession).toBe(false);
+      expect(response.sessionAttributes).toEqual(
+        expect.objectContaining({ awaitingTaskTitle: true }),
+      );
+      expect(response.response.directives).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'Dialog.ElicitSlot',
+            slotToElicit: 'taskTitle',
+          }),
+        ]),
+      );
+    });
+
+    it('completes task creation when user responds with taskTitle in second turn', async () => {
+      const response = await service.handleAlexaWebhook({
+        session: {
+          user: { accessToken: 'valid_user_access_token' },
+          attributes: {
+            awaitingTaskTitle: true,
+            date: '2026-10-22',
+          },
+        },
+        request: {
+          type: 'IntentRequest',
+          intent: {
+            name: ALEXA_INTENTS.CREATE_TASK,
+            slots: {
+              taskTitle: { value: 'comprar pão na padaria' },
+            },
+          },
+        },
+      });
+
+      expect(prisma.task.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            title: 'Comprar pão na padaria',
+          }),
+        }),
+      );
+      expect(response.response.outputSpeech.text).toContain('Comprar pão na padaria');
+      expect(response.response.shouldEndSession).toBe(true);
+    });
+
+    it('cleans carrier prefixes like "o nome é ..." or "adicionar ..."', async () => {
+      const response = await service.handleAlexaWebhook({
+        session: {
+          user: { accessToken: 'valid_user_access_token' },
+          attributes: { awaitingTaskTitle: true },
+        },
+        request: {
+          type: 'IntentRequest',
+          intent: {
+            name: ALEXA_INTENTS.CREATE_TASK,
+            slots: {
+              taskTitle: { value: 'o nome é estudar física' },
+            },
+          },
+        },
+      });
+
+      expect(prisma.task.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            title: 'Estudar física',
+          }),
+        }),
+      );
+      expect(response.response.outputSpeech.text).toContain('Estudar física');
+    });
+
+    it('reprompts with Dialog.ElicitSlot if FallbackIntent is triggered while awaitingTaskTitle', async () => {
+      const response = await service.handleAlexaWebhook({
+        session: {
+          user: { accessToken: 'valid_user_access_token' },
+          attributes: { awaitingTaskTitle: true },
+        },
+        request: {
+          type: 'IntentRequest',
+          intent: {
+            name: ALEXA_INTENTS.FALLBACK,
+          },
+        },
+      });
+
+      expect(response.response.outputSpeech.text).toContain('Não consegui entender o nome da tarefa');
+      expect(response.response.shouldEndSession).toBe(false);
+      expect(response.response.directives).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'Dialog.ElicitSlot',
+            slotToElicit: 'taskTitle',
+          }),
+        ]),
+      );
+    });
+
     it('handles GetNotificationsIntent when there are overdue tasks', async () => {
       prisma.task.findMany.mockResolvedValueOnce([
         { id: '1', title: 'Enviar relatório mensal' },
@@ -305,6 +416,101 @@ describe('AlexaService', () => {
           }),
         }),
       );
+    });
+
+    it('prompts to hear more when user has more than 3 tasks on LaunchRequest', async () => {
+      prisma.task.findMany.mockResolvedValueOnce([
+        { id: '1', title: 'Regar as plantas' },
+        { id: '2', title: 'Fazer compras no Assaí' },
+        { id: '3', title: 'Beijar a Daiana' },
+        { id: '4', title: 'Levar o Speed para passear' },
+        { id: '5', title: 'Lavar a louça' },
+      ]);
+
+      const response = await service.handleAlexaWebhook({
+        session: { user: { accessToken: 'valid_user_access_token' } },
+        request: { type: 'LaunchRequest' },
+      });
+
+      expect(response.response.outputSpeech.text).toContain('Você tem 5 tarefas para hoje no Tudú');
+      expect(response.response.outputSpeech.text).toContain('1, Regar as plantas');
+      expect(response.response.outputSpeech.text).toContain('Deseja ouvir mais ou adicionar um novo tudú?');
+      expect(response.sessionAttributes.awaitingMoreTasks).toBe(true);
+      expect(response.sessionAttributes.alreadyReadCount).toBe(3);
+    });
+
+    it('reads remaining tasks when user responds with YesIntent / ouvir mais', async () => {
+      prisma.task.findMany.mockResolvedValueOnce([
+        { id: '1', title: 'Regar as plantas' },
+        { id: '2', title: 'Fazer compras no Assaí' },
+        { id: '3', title: 'Beijar a Daiana' },
+        { id: '4', title: 'Levar o Speed para passear' },
+        { id: '5', title: 'Lavar a louça' },
+      ]);
+
+      const response = await service.handleAlexaWebhook({
+        session: {
+          user: { accessToken: 'valid_user_access_token' },
+          attributes: { awaitingMoreTasks: true, alreadyReadCount: 3 },
+        },
+        request: {
+          type: 'IntentRequest',
+          intent: { name: ALEXA_INTENTS.YES },
+        },
+      });
+
+      expect(response.response.outputSpeech.text).toContain('As tarefas restantes de hoje são');
+      expect(response.response.outputSpeech.text).toContain('4, Levar o Speed para passear');
+      expect(response.response.outputSpeech.text).toContain('5, Lavar a louça');
+      expect(response.response.outputSpeech.text).toContain('Total de 5 tarefas para hoje');
+      expect(response.sessionAttributes.awaitingMoreTasks).toBe(false);
+    });
+
+    it('intercepts "ouvir mais" in CreateTaskIntent and reads remaining tasks instead of creating a task', async () => {
+      prisma.task.findMany.mockResolvedValueOnce([
+        { id: '1', title: 'Regar as plantas' },
+        { id: '2', title: 'Fazer compras no Assaí' },
+        { id: '3', title: 'Beijar a Daiana' },
+        { id: '4', title: 'Levar o Speed para passear' },
+        { id: '5', title: 'Lavar a louça' },
+      ]);
+
+      const response = await service.handleAlexaWebhook({
+        session: {
+          user: { accessToken: 'valid_user_access_token' },
+          attributes: { awaitingMoreTasks: true, alreadyReadCount: 3 },
+        },
+        request: {
+          type: 'IntentRequest',
+          intent: {
+            name: ALEXA_INTENTS.CREATE_TASK,
+            slots: {
+              taskTitle: { value: 'ouvir mais' },
+            },
+          },
+        },
+      });
+
+      expect(prisma.task.create).not.toHaveBeenCalled();
+      expect(response.response.outputSpeech.text).toContain('As tarefas restantes de hoje são');
+      expect(response.response.outputSpeech.text).toContain('4, Levar o Speed para passear');
+      expect(response.response.outputSpeech.text).toContain('5, Lavar a louça');
+    });
+
+    it('handles NoIntent when user does not want to hear more tasks', async () => {
+      const response = await service.handleAlexaWebhook({
+        session: {
+          user: { accessToken: 'valid_user_access_token' },
+          attributes: { awaitingMoreTasks: true },
+        },
+        request: {
+          type: 'IntentRequest',
+          intent: { name: ALEXA_INTENTS.NO },
+        },
+      });
+
+      expect(response.response.outputSpeech.text).toBe('Tudo bem! Até logo.');
+      expect(response.response.shouldEndSession).toBe(true);
     });
   });
 });

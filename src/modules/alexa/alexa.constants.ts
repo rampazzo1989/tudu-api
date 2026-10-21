@@ -6,6 +6,8 @@ export const ALEXA_INTENTS = {
   HELP: 'AMAZON.HelpIntent',
   CANCEL: 'AMAZON.CancelIntent',
   STOP: 'AMAZON.StopIntent',
+  YES: 'AMAZON.YesIntent',
+  NO: 'AMAZON.NoIntent',
   FALLBACK: 'AMAZON.FallbackIntent',
 } as const;
 

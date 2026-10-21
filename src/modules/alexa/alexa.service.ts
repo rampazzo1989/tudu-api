@@ -250,13 +250,20 @@ export class AlexaService {
     if (requestType === 'IntentRequest') {
       const intentName = request.intent?.name;
       const slots = request.intent?.slots || {};
+      const sessionAttributes = body?.session?.attributes || {};
 
       switch (intentName) {
         case ALEXA_INTENTS.GET_TODAY_TASKS:
-          return this.handleGetTodayTasks(user);
+          return this.handleGetTodayTasks(user, sessionAttributes);
+
+        case ALEXA_INTENTS.YES:
+          return this.handleReadMoreTasks(user, sessionAttributes);
+
+        case ALEXA_INTENTS.NO:
+          return this.handleStop(sessionAttributes);
 
         case ALEXA_INTENTS.CREATE_TASK:
-          return this.handleCreateTask(user, slots);
+          return this.handleCreateTask(user, slots, sessionAttributes);
 
         case ALEXA_INTENTS.GET_NOTIFICATIONS:
           return this.handleGetNotifications(user);
@@ -266,11 +273,11 @@ export class AlexaService {
 
         case ALEXA_INTENTS.CANCEL:
         case ALEXA_INTENTS.STOP:
-          return this.handleStop();
+          return this.handleStop(sessionAttributes);
 
         case ALEXA_INTENTS.FALLBACK:
         default:
-          return this.handleFallback();
+          return this.handleFallback(sessionAttributes, slots);
       }
     }
 
@@ -289,24 +296,48 @@ export class AlexaService {
     if (count === 0) {
       speech =
         'Olá! Você não tem nenhuma tarefa pendente para hoje no Tudú. O que você gostaria de fazer? Você pode pedir para adicionar um novo tudú.';
-    } else {
+      return this.buildResponse(
+        speech,
+        false,
+        'Você pode pedir para adicionar um novo tudú.',
+        { awaitingMoreTasks: false, alreadyReadCount: 0 },
+      );
+    }
+
+    if (count <= 3) {
       const sample = todayTasks
-        .slice(0, 3)
         .map((t, idx) => `${idx + 1}, ${t.title}`)
         .join('; ');
       speech = `Olá! Você tem ${count} ${
         count === 1 ? 'tarefa' : 'tarefas'
-      } para hoje no Tudú. ${sample}. Deseja ouvir mais ou adicionar um novo tudú?`;
+      } para hoje no Tudú: ${sample}. O que você gostaria de fazer? Você pode pedir para adicionar um novo tudú.`;
+      return this.buildResponse(
+        speech,
+        false,
+        'Você pode pedir para adicionar um novo tudú.',
+        { awaitingMoreTasks: false, alreadyReadCount: count },
+      );
     }
+
+    const sample = todayTasks
+      .slice(0, 3)
+      .map((t, idx) => `${idx + 1}, ${t.title}`)
+      .join('; ');
+    speech = `Olá! Você tem ${count} tarefas para hoje no Tudú. As primeiras três são: ${sample}. Deseja ouvir mais ou adicionar um novo tudú?`;
 
     return this.buildResponse(
       speech,
       false,
-      'Você pode perguntar quais são suas tarefas de hoje ou pedir para adicionar um tudú.',
+      'Diga "ouvir mais" para ouvir as outras tarefas ou peça para adicionar uma nova tarefa.',
+      { awaitingMoreTasks: true, alreadyReadCount: 3 },
     );
   }
 
-  private async handleGetTodayTasks(user: any) {
+  private async handleGetTodayTasks(user: any, sessionAttributes?: Record<string, any>) {
+    if (sessionAttributes?.awaitingMoreTasks) {
+      return this.handleReadMoreTasks(user, sessionAttributes);
+    }
+
     const todayTasks = await this.getTodayTasksForUser(user.id);
     const count = todayTasks.length;
 
@@ -318,36 +349,110 @@ export class AlexaService {
     }
 
     if (count <= 5) {
-      const taskList = todayTasks.map((t) => t.title).join(', ');
+      const taskList = todayTasks.map((t, idx) => `${idx + 1}, ${t.title}`).join('; ');
       return this.buildResponse(
-        `Você tem ${count} ${count === 1 ? 'tarefa' : 'tarefas'} para hoje no Tudú: ${taskList}.`,
-        true,
+        `Você tem ${count} ${count === 1 ? 'tarefa' : 'tarefas'} para hoje no Tudú: ${taskList}. Deseja adicionar um novo tudú?`,
+        false,
+        'Você pode pedir para adicionar um novo tudú.',
+        { awaitingMoreTasks: false, alreadyReadCount: count },
       );
     }
 
-    const firstFive = todayTasks.slice(0, 5).map((t) => t.title).join(', ');
+    const firstFive = todayTasks
+      .slice(0, 5)
+      .map((t, idx) => `${idx + 1}, ${t.title}`)
+      .join('; ');
     const remaining = count - 5;
     return this.buildResponse(
-      `Você tem ${count} tarefas para hoje. As primeiras cinco são: ${firstFive}. E mais ${remaining} tarefas pendentes.`,
-      true,
+      `Você tem ${count} tarefas para hoje. As primeiras cinco são: ${firstFive}. Deseja ouvir mais ou adicionar um novo tudú?`,
+      false,
+      'Diga "ouvir mais" para ouvir as tarefas restantes.',
+      { awaitingMoreTasks: true, alreadyReadCount: 5 },
     );
   }
 
-  private async handleCreateTask(user: any, slots: Record<string, any>) {
-    const titleSlot = slots.taskTitle?.value;
-    const dateSlot = slots.date?.value;
-    const timeSlot = slots.time?.value;
-    const listSlot = slots.listName?.value;
+  private async handleReadMoreTasks(user: any, sessionAttributes?: Record<string, any>) {
+    const todayTasks = await this.getTodayTasksForUser(user.id);
+    const count = todayTasks.length;
+    const alreadyReadCount = sessionAttributes?.alreadyReadCount || 3;
+    const remainingTasks = todayTasks.slice(alreadyReadCount);
 
-    if (!titleSlot || !titleSlot.trim()) {
+    if (remainingTasks.length === 0) {
+      const allTasksList = todayTasks.map((t, idx) => `${idx + 1}, ${t.title}`).join('; ');
       return this.buildResponse(
-        'Qual tarefa você gostaria de adicionar no Tudú?',
+        `Essas eram todas as suas tarefas de hoje no Tudú: ${allTasksList}. Deseja adicionar um novo tudú?`,
         false,
-        'Diga o que você quer que eu anote.',
+        'Você pode pedir para adicionar um novo tudú.',
+        { awaitingMoreTasks: false, alreadyReadCount: count },
       );
     }
 
-    const taskTitle = titleSlot.trim().charAt(0).toUpperCase() + titleSlot.trim().slice(1);
+    const remainingList = remainingTasks
+      .map((t, idx) => `${alreadyReadCount + idx + 1}, ${t.title}`)
+      .join('; ');
+
+    const speech = `As tarefas restantes de hoje são: ${remainingList}. Total de ${count} ${
+      count === 1 ? 'tarefa' : 'tarefas'
+    } para hoje. Deseja adicionar um novo tudú?`;
+
+    return this.buildResponse(
+      speech,
+      false,
+      'Você pode pedir para adicionar um novo tudú ou dizer parar.',
+      { awaitingMoreTasks: false, alreadyReadCount: count },
+    );
+  }
+
+  private async handleCreateTask(
+    user: any,
+    slots: Record<string, any>,
+    sessionAttributes?: Record<string, any>,
+  ) {
+    const rawTitleSlot = slots.taskTitle?.value;
+    const dateSlot = slots.date?.value || sessionAttributes?.date;
+    const timeSlot = slots.time?.value || sessionAttributes?.time;
+    const listSlot = slots.listName?.value || sessionAttributes?.listName;
+
+    // Guard: Prevent "ouvir mais", "sim", "não" from being treated as a task title
+    if (
+      this.isHearMorePhrase(rawTitleSlot) ||
+      (sessionAttributes?.awaitingMoreTasks && this.isHearMorePhrase(rawTitleSlot))
+    ) {
+      return this.handleReadMoreTasks(user, sessionAttributes);
+    }
+
+    if (
+      this.isNegativePhrase(rawTitleSlot) ||
+      (sessionAttributes?.awaitingMoreTasks && this.isNegativePhrase(rawTitleSlot))
+    ) {
+      return this.handleStop(sessionAttributes);
+    }
+
+    const cleanedTitle = this.cleanTaskTitle(rawTitleSlot);
+
+    if (
+      this.isHearMorePhrase(cleanedTitle || undefined) ||
+      (sessionAttributes?.awaitingMoreTasks && this.isHearMorePhrase(cleanedTitle || undefined))
+    ) {
+      return this.handleReadMoreTasks(user, sessionAttributes);
+    }
+
+    if (!cleanedTitle) {
+      return this.buildElicitSlotResponse(
+        'taskTitle',
+        'Qual o nome da tarefa?',
+        'Diga o nome da tarefa que você deseja adicionar.',
+        {
+          awaitingTaskTitle: true,
+          date: dateSlot,
+          time: timeSlot,
+          listName: listSlot,
+        },
+        slots,
+      );
+    }
+
+    const taskTitle = cleanedTitle.charAt(0).toUpperCase() + cleanedTitle.slice(1);
     const { dueDate, hasTime, formattedSpeechDate } = this.parseAlexaDateTime(dateSlot, timeSlot);
 
     // Look for matching list if requested
@@ -441,11 +546,31 @@ export class AlexaService {
     return this.buildResponse(speech, false, 'Você pode pedir para ler as tarefas de hoje ou adicionar um tudú.');
   }
 
-  private handleStop() {
+  private handleStop(sessionAttributes?: Record<string, any>) {
+    if (sessionAttributes?.awaitingMoreTasks) {
+      return this.buildResponse('Tudo bem! Até logo.', true);
+    }
     return this.buildResponse('Até logo! Bom proveito com o Tudú.', true);
   }
 
-  private handleFallback() {
+  private handleFallback(sessionAttributes?: Record<string, any>, slots?: Record<string, any>) {
+    if (sessionAttributes?.awaitingTaskTitle) {
+      return this.buildElicitSlotResponse(
+        'taskTitle',
+        'Não consegui entender o nome da tarefa. Diga o que você deseja adicionar, por exemplo: comprar pão.',
+        'Por favor, diga o nome da tarefa.',
+        sessionAttributes,
+        slots,
+      );
+    }
+    if (sessionAttributes?.awaitingMoreTasks) {
+      return this.buildResponse(
+        'Você gostaria de ouvir o restante das tarefas de hoje ou deseja adicionar um novo tudú?',
+        false,
+        'Diga "ouvir mais" para ouvir as outras tarefas ou "adicionar tarefa" para criar um tudú.',
+        sessionAttributes,
+      );
+    }
     const speech =
       'Desculpe, não entendi. Você pode perguntar "quais são minhas tarefas de hoje" ou pedir "adicionar uma nova tarefa".';
     return this.buildResponse(speech, false, 'Como posso ajudar no seu Tudú?');
@@ -454,6 +579,82 @@ export class AlexaService {
   // ==========================================
   // HELPERS
   // ==========================================
+
+  private isHearMorePhrase(text?: string): boolean {
+    if (!text) return false;
+    const normalized = text
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+
+    const phrases = [
+      'ouvir mais',
+      'ouvir mais tarefas',
+      'quero ouvir mais',
+      'quero ouvir mais tarefas',
+      'ouvir as outras',
+      'ouvir as outras tarefas',
+      'ouvir o resto',
+      'ouvir o restante',
+      'ouvir todas as tarefas',
+      'ouvir todas',
+      'ler mais',
+      'ler mais tarefas',
+      'ler todas',
+      'ler todas tarefas',
+      'ler todas as tarefas',
+      'ler todas as tarefas de hoje',
+      'ler o resto',
+      'ler o restante',
+      'falar mais',
+      'falar mais tarefas',
+      'falar todas',
+      'falar todas as tarefas',
+      'falar o resto',
+      'quais sao as outras',
+      'mais tarefas',
+      'mais',
+      'todas tarefas',
+      'todas as tarefas',
+      'todas',
+      'continuar',
+      'continua',
+      'sim',
+      'quero',
+      'pode falar',
+      'pode ser',
+      'com certeza',
+      'claro',
+    ];
+
+    return (
+      phrases.includes(normalized) ||
+      /^(ouvir mais|ler mais|ler todas|falar mais|mais|sim|continuar)/i.test(normalized)
+    );
+  }
+
+  private isNegativePhrase(text?: string): boolean {
+    if (!text) return false;
+    const normalized = text
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+
+    const phrases = [
+      'nao',
+      'nao quero',
+      'nao precisa',
+      'agora nao',
+      'deixa',
+      'depois',
+      'nao obrigado',
+      'nao obrigada',
+    ];
+
+    return phrases.includes(normalized) || /^nao\b/i.test(normalized);
+  }
 
   private async getTodayTasksForUser(userId: string) {
     const now = new Date();
@@ -472,7 +673,7 @@ export class AlexaService {
         },
       },
       orderBy: [{ dueDate: 'asc' }, { order: 'asc' }],
-      take: 10,
+      take: 50,
     });
   }
 
@@ -556,9 +757,95 @@ export class AlexaService {
     return { dueDate, hasTime, formattedSpeechDate };
   }
 
-  private buildResponse(speechText: string, shouldEndSession: boolean, repromptText?: string) {
+  private cleanTaskTitle(raw?: string): string | null {
+    if (!raw || !raw.trim()) return null;
+    let title = raw.trim();
+
+    // Regex to remove conversational prefixes when answering "qual o nome da tarefa?"
+    const prefixRegex =
+      /^(o\s+nome\s+da\s+tarefa\s+[ée]\s+|o\s+nome\s+[ée]\s+|o\s+t[íi]tulo\s+[ée]\s+|a\s+tarefa\s+[ée]\s+|[ée]\s+|chama\s+|adicionar\s+(uma\s+nova\s+tarefa\s+|uma\s+tarefa\s+|nova\s+tarefa\s+|tarefa\s+)?|anotar\s+(uma\s+nova\s+tarefa\s+|uma\s+tarefa\s+|nova\s+tarefa\s+|tarefa\s+)?|criar\s+(uma\s+nova\s+tarefa\s+|uma\s+tarefa\s+|nova\s+tarefa\s+|tarefa\s+)?|colocar\s+(uma\s+tarefa\s+|tarefa\s+)?)/i;
+
+    title = title.replace(prefixRegex, '').trim();
+
+    if (!title) return null;
+    return title;
+  }
+
+  private buildElicitSlotResponse(
+    slotToElicit: string,
+    speechText: string,
+    repromptText?: string,
+    sessionAttributes?: Record<string, any>,
+    existingSlots?: Record<string, any>,
+  ) {
+    const slotsPayload: Record<string, any> = {
+      taskTitle: {
+        name: 'taskTitle',
+        confirmationStatus: 'NONE',
+        ...(existingSlots?.taskTitle?.value ? { value: existingSlots.taskTitle.value } : {}),
+      },
+      date: {
+        name: 'date',
+        confirmationStatus: 'NONE',
+        ...(existingSlots?.date?.value || sessionAttributes?.date
+          ? { value: existingSlots?.date?.value || sessionAttributes?.date }
+          : {}),
+      },
+      time: {
+        name: 'time',
+        confirmationStatus: 'NONE',
+        ...(existingSlots?.time?.value || sessionAttributes?.time
+          ? { value: existingSlots?.time?.value || sessionAttributes?.time }
+          : {}),
+      },
+      listName: {
+        name: 'listName',
+        confirmationStatus: 'NONE',
+        ...(existingSlots?.listName?.value || sessionAttributes?.listName
+          ? { value: existingSlots?.listName?.value || sessionAttributes?.listName }
+          : {}),
+      },
+    };
+
     return {
       version: '1.0',
+      ...(sessionAttributes ? { sessionAttributes } : {}),
+      response: {
+        outputSpeech: {
+          type: 'PlainText',
+          text: speechText,
+        },
+        reprompt: {
+          outputSpeech: {
+            type: 'PlainText',
+            text: repromptText || speechText,
+          },
+        },
+        shouldEndSession: false,
+        directives: [
+          {
+            type: 'Dialog.ElicitSlot',
+            slotToElicit,
+            updatedIntent: {
+              name: ALEXA_INTENTS.CREATE_TASK,
+              confirmationStatus: 'NONE',
+              slots: slotsPayload,
+            },
+          },
+        ],
+      },
+    };
+  }
+
+  private buildResponse(
+    speechText: string,
+    shouldEndSession: boolean,
+    repromptText?: string,
+    sessionAttributes?: Record<string, any>,
+  ) {
+    return {
+      version: '1.0',
+      ...(sessionAttributes ? { sessionAttributes } : {}),
       response: {
         outputSpeech: {
           type: 'PlainText',
